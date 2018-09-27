@@ -24,6 +24,7 @@ static uint64_t		sep_collection_switch;
 static uint64_t		socwatch_collection_switch;
 static bool			in_pmu_profiling;
 
+static uint32_t profiling_pmi_irq = IRQ_INVALID;
 void profiling_initialize_vmsw(void)
 {
 	dev_dbg(ACRN_DBG_PROFILING, "%s: entering cpu%d",
@@ -293,6 +294,52 @@ void profiling_handle_msrops(void)
 	dev_dbg(ACRN_DBG_PROFILING, "%s: exiting cpu%d",
 		__func__, get_cpu_id());
 }
+
+/*
+ * Requests IRQ
+ */
+int profiling_pmi_request_irq(int cpu, irq_action_t func,
+		void *data, const char *name)
+{
+	int irq = PMI_IRQ; /* system allocate */
+	int retval;
+
+	dev_dbg(ACRN_DBG_PROFILING, "%s: entering", __func__);
+
+	if (cpu > 0) {
+		dev_dbg(ACRN_DBG_PROFILING, "%s: exiting", __func__);
+		return 0;
+	}
+
+	if (profiling_pmi_irq != IRQ_INVALID) {
+		pr_info("PMI node already allocated on CPU%d", cpu);
+		free_irq(profiling_pmi_irq);
+	}
+
+	pr_info("%s: calling request_irq", __func__);
+
+	/* all cpu register same PMI vector */
+
+	retval = request_irq(irq, func, data, IRQF_NONE);
+	if (retval < 0) {
+		pr_err("Failed to add PMI isr");
+		return -1;
+	}
+	profiling_pmi_irq = (uint32_t) retval;
+
+	dev_dbg(ACRN_DBG_PROFILING, "%s: exiting", __func__);
+	return 0;
+}
+
+/*
+ * Interrupt handler for performance monitoring interrupts
+ */
+static int profiling_pmi_handler(__unused int irq, __unused void *data)
+{
+	/* To be implemented */
+	return 0;
+}
+
 /*
  * Initialize sep state and enable PMU counters
  */
@@ -386,6 +433,40 @@ void profiling_stop_pmu(void)
 	in_pmu_profiling = false;
 
 	dev_dbg(ACRN_DBG_PROFILING, "%s: done.", __func__);
+}
+
+/*
+ * Request IRQ for performance monitoring interrupts
+ */
+void profiling_setup_pmi(void)
+{
+	int cpu;
+	char name[32] = {0};
+
+	dev_dbg(ACRN_DBG_PROFILING, "%s: entering", __func__);
+
+	cpu = (int) get_cpu_id();
+
+	per_cpu(sep_info.sep_state, cpu).valid_pmi_count = 0U;
+	per_cpu(sep_info.sep_state, cpu).total_pmi_count = 0U;
+	per_cpu(sep_info.sep_state, cpu).total_vmexit_count = 0U;
+	per_cpu(sep_info.sep_state, cpu).pmu_state = PMU_INITIALIZED;
+
+	/* support PMI notification, VM0 will register all CPU */
+	snprintf(name, 32, "PMI_ISR%d", cpu);
+	if (profiling_pmi_request_irq(cpu,
+			profiling_pmi_handler, NULL, name) < 0) {
+		pr_err("PMI setup failed");
+		return;
+	}
+
+	pr_info("%s : irq[%d] setup vector %x",
+	__func__, profiling_pmi_irq, irq_to_vector(profiling_pmi_irq));
+
+	write_lapic_reg32(LAPIC_LVT_PMC_REGISTER,
+		VECTOR_PMI | LVT_PERFCTR_BIT_MASK);
+
+	dev_dbg(ACRN_DBG_PROFILING, "%s: exiting", __func__);
 }
 
 /*
@@ -906,7 +987,16 @@ void profiling_capture_intr_context(struct intr_excp_ctx *ctx)
  */
 void profiling_setup(void)
 {
-	/* to be implemented */
+	dev_dbg(ACRN_DBG_PROFILING, "%s: entering", __func__);
+
+	profiling_setup_pmi();
+
+	get_cpu_var(sep_info.sep_state).vmexit_msr_list = NULL;
+	get_cpu_var(sep_info.sep_state).vmexit_msr_cnt = 1;
+
+	get_cpu_var(sep_info.sep_state).pmu_state = PMU_INITIALIZED;
+
+	dev_dbg(ACRN_DBG_PROFILING, "%s: exiting", __func__);
 }
 
 #endif
