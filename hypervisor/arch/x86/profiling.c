@@ -11,25 +11,124 @@
 #include <hv_debug.h>
 #include <profiling.h>
 
+#define ACRN_DBG_PROFILING		5U
+
+#define LVT_PERFCTR_BIT_UNMASK		0xFFFEFFFFU
+#define LVT_PERFCTR_BIT_MASK		0x10000U
+#define VALID_DEBUGCTL_BIT_MASK		0x1801U
+
 void profiling_initialize_vmsw(void)
 {
-	/* to be implemented */
+	dev_dbg(ACRN_DBG_PROFILING, "%s: entering cpu%d",
+		__func__, get_cpu_id());
+
+	dev_dbg(ACRN_DBG_PROFILING, "%s: exiting cpu%d",
+		__func__, get_cpu_id());
 }
 
 /*
  * Configure the PMU's for sep/socwatch profiling.
+ * Initial write of PMU registers.
+ * Walk through the entries and write the value of the register accordingly.
+ * Note: current_group is always set to 0, only 1 group is supported.
  */
 void profiling_initialize_pmi(void)
 {
-	/* to be implemented */
+	unsigned int i;
+	uint32_t group_id;
+	struct profiling_msr_op *msrop = NULL;
+	struct sep_state *sepstate = &(get_cpu_var(sep_info.sep_state));
+
+	dev_dbg(ACRN_DBG_PROFILING, "%s: entering cpu%d",
+		__func__, get_cpu_id());
+
+	group_id = sepstate->current_pmi_group_id = 0U;
+	for (i = 0U; i < MAX_MSR_LIST_NUM; i++) {
+		msrop = &(sepstate->pmi_initial_msr_list[group_id][i]);
+		if (msrop->msr_id == (int32_t)-1) {
+			break;
+		}
+		if ((uint32_t)msrop->msr_id == MSR_IA32_DEBUGCTL) {
+			sepstate->guest_debugctl_value = msrop->value;
+		}
+		if (msrop->op_type == MSR_OP_WRITE) {
+			msr_write(msrop->msr_id, msrop->value);
+			dev_dbg(ACRN_DBG_PROFILING,
+			"%s: MSRWRITE cpu%d, msr_id=0x%x, msr_val=0x%llx",
+			__func__, get_cpu_id(), msrop->msr_id, msrop->value);
+		}
+	}
+
+	sepstate->pmu_state = PMU_SETUP;
+
+	dev_dbg(ACRN_DBG_PROFILING, "%s: exiting cpu%d",
+		__func__,  get_cpu_id());
 }
 
 /*
  * Enable all the Performance Monitoring Control registers.
+ * Unmask LAPIC entry for PMC register to enable performance monitoring
+ * Walk through the entries and write to PMU control registers.
  */
 void profiling_enable_pmu(void)
 {
-	/* to be implemented */
+	uint32_t lvt_perf_ctr;
+	unsigned int i;
+	uint32_t group_id;
+	struct profiling_msr_op *msrop = NULL;
+	struct sep_state *sepstate = &(get_cpu_var(sep_info.sep_state));
+
+	/* Unmask LAPIC LVT entry for PMC register */
+	lvt_perf_ctr = read_lapic_reg32(LAPIC_LVT_PMC_REGISTER);
+	dev_dbg(ACRN_DBG_PROFILING, "%s: 0x%x, 0x%llx",
+		__func__, LAPIC_LVT_PMC_REGISTER, lvt_perf_ctr);
+	lvt_perf_ctr &= LVT_PERFCTR_BIT_UNMASK;
+	write_lapic_reg32(LAPIC_LVT_PMC_REGISTER, lvt_perf_ctr);
+	dev_dbg(ACRN_DBG_PROFILING, "%s: 0x%x, 0x%llx",
+		__func__, LAPIC_LVT_PMC_REGISTER, lvt_perf_ctr);
+
+	if (sepstate->guest_debugctl_value != 0U) {
+		if (sepstate->vmexit_msr_list == NULL) {
+			sepstate->vmexit_msr_list = (struct vmexit_msr *)
+					malloc(sizeof(struct vmexit_msr));
+		}
+
+		/* Set the VM Exit MSR Load in VMCS */
+		if (sepstate->vmexit_msr_list != NULL) {
+			sepstate->vmexit_msr_cnt = 1;
+			sepstate->vmexit_msr_list[0].msr_idx
+				= MSR_IA32_DEBUGCTL;
+			sepstate->vmexit_msr_list[0].msr_data
+				= sepstate->guest_debugctl_value &
+					VALID_DEBUGCTL_BIT_MASK;
+
+			exec_vmwrite64(VMX_EXIT_MSR_LOAD_ADDR_FULL,
+				hva2hpa(sepstate->vmexit_msr_list));
+			exec_vmwrite(VMX_EXIT_MSR_LOAD_COUNT,
+				sepstate->vmexit_msr_cnt);
+		}
+		/* VMCS GUEST field */
+		sepstate->saved_debugctl_value
+			= exec_vmread64(VMX_GUEST_IA32_DEBUGCTL_FULL);
+		exec_vmwrite64(VMX_GUEST_IA32_DEBUGCTL_FULL,
+		  (sepstate->guest_debugctl_value & VALID_DEBUGCTL_BIT_MASK));
+	}
+
+	group_id = sepstate->current_pmi_group_id;
+	for (i = 0U; i < MAX_MSR_LIST_NUM; i++) {
+		msrop = &(sepstate->pmi_start_msr_list[group_id][i]);
+		if (msrop->msr_id == (int32_t)-1) {
+			break;
+		}
+		if (msrop->op_type == MSR_OP_WRITE) {
+			msr_write(msrop->msr_id, msrop->value);
+			dev_dbg(ACRN_DBG_PROFILING,
+			"%s: MSRWRITE cpu%d, msr_id=0x%x, msr_val=0x%llx",
+			__func__, get_cpu_id(), msrop->msr_id, msrop->value);
+		}
+	}
+
+	sepstate->pmu_state = PMU_RUNNING;
 }
 
 /*
@@ -37,7 +136,43 @@ void profiling_enable_pmu(void)
  */
 void profiling_disable_pmu(void)
 {
-	/* to be implemented */
+	uint32_t lvt_perf_ctr;
+	unsigned int i;
+	uint32_t group_id;
+	struct profiling_msr_op *msrop = NULL;
+	struct sep_state *sepstate = &(get_cpu_var(sep_info.sep_state));
+
+	if (sepstate->vmexit_msr_list) {
+		/* Set the VM Exit MSR Load in VMCS */
+		exec_vmwrite(VMX_EXIT_MSR_LOAD_COUNT, 0x0U);
+		exec_vmwrite64(VMX_GUEST_IA32_DEBUGCTL_FULL,
+			sepstate->saved_debugctl_value);
+
+		free(sepstate->vmexit_msr_list);
+		sepstate->vmexit_msr_list = NULL;
+		sepstate->vmexit_msr_cnt = 0;
+	}
+
+	group_id = sepstate->current_pmi_group_id;
+	for (i = 0U; i < MAX_MSR_LIST_NUM; i++) {
+		msrop = &(sepstate->pmi_stop_msr_list[group_id][i]);
+		if (msrop->msr_id == (int32_t)-1) {
+			break;
+		}
+		if (msrop->op_type == MSR_OP_WRITE) {
+			msr_write(msrop->msr_id, msrop->value);
+			dev_dbg(ACRN_DBG_PROFILING,
+			"%s: MSRWRITE cpu%d, msr_id=0x%x, msr_val=0x%llx",
+			__func__, get_cpu_id(), msrop->msr_id, msrop->value);
+		}
+	}
+
+	/* Mask LAPIC LVT entry for PMC register */
+	lvt_perf_ctr = read_lapic_reg32(LAPIC_LVT_PMC_REGISTER);
+	lvt_perf_ctr |= LVT_PERFCTR_BIT_MASK;
+	write_lapic_reg32(LAPIC_LVT_PMC_REGISTER, lvt_perf_ctr);
+
+	sepstate->pmu_state = PMU_SETUP;
 }
 
 /*
@@ -120,9 +255,7 @@ int profiling_get_pcpuid(uint64_t addr)
 	return 0;
 }
 
-
 #ifdef HV_DEBUG
-
 /*
  * IPI interrupt handler function
  */
