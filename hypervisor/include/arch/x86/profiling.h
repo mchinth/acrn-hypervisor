@@ -138,6 +138,19 @@ struct profiling_vm_info_list {
 	struct profiling_vm_info vm_list[MAX_NR_VMS];
 } __aligned(8);
 
+struct profiling_version_info {
+	int32_t major;
+	int32_t minor;
+	int64_t supported_features;
+	int64_t reserved;
+} __aligned(8);
+
+struct profiling_control {
+	int32_t		collector_id;
+	int32_t		reserved;
+	uint64_t	switches;
+} __aligned(8);
+
 struct profiling_pcpuid {
 	uint32_t leaf;
 	uint32_t subleaf;
@@ -237,6 +250,8 @@ struct sep_profiling_wrapper {
 
 struct intr_excp_ctx;
 
+void profiling_start_pmu(void);
+void profiling_stop_pmu(void);
 int profiling_get_version(uint64_t addr);
 int profiling_get_pcpuid(uint64_t addr);
 int profiling_msr_ops_all_cpus(uint64_t addr);
