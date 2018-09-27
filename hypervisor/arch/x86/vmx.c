@@ -1069,8 +1069,14 @@ static void init_entry_ctrl(__unused struct vcpu *vcpu)
 	 * on VM entry processor is in IA32e 64 bitmode * Start guest with host
 	 * IA32_PAT and IA32_EFER
 	 */
+#ifdef HV_DEBUG
+	value32 = (VMX_ENTRY_CTLS_LOAD_EFER |
+		   VMX_ENTRY_CTLS_LOAD_PAT |
+		   VMX_ENTRY_CTLS_LOAD_DBG);
+#else
 	value32 = (VMX_ENTRY_CTLS_LOAD_EFER |
 		   VMX_ENTRY_CTLS_LOAD_PAT);
+#endif
 
 	if (get_vcpu_mode(vcpu) == CPU_MODE_64BIT) {
 		value32 |= (VMX_ENTRY_CTLS_IA32E_MODE);

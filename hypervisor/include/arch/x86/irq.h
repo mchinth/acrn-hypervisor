@@ -21,6 +21,7 @@
 #define VECTOR_NOTIFY_VCPU	0xF0U
 #define VECTOR_VIRT_IRQ_VHM	0xF7U
 #define VECTOR_SPURIOUS		0xFFU
+#define VECTOR_PMI		0xF4U
 
 /* the maximum number of msi entry is 2048 according to PCI
  * local bus specification
@@ -34,6 +35,7 @@
 
 #define TIMER_IRQ		(NR_IRQS - 1U)
 #define NOTIFY_IRQ		(NR_IRQS - 2U)
+#define PMI_IRQ			(NR_IRQS - 3U)
 
 #define DEFAULT_DEST_MODE	IOAPIC_RTE_DESTLOG
 #define DEFAULT_DELIVERY_MODE	IOAPIC_RTE_DELLOPRI

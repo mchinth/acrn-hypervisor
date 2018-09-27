@@ -34,6 +34,7 @@
 #include <vmx.h>
 #include <assign.h>
 #include <vtd.h>
+#include <profiling.h>
 
 #include <guest.h>
 #include <vmexit.h>

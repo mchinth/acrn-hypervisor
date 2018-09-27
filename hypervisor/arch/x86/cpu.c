@@ -486,6 +486,7 @@ static void bsp_boot_post(void)
 	interrupt_init(BOOT_CPU_ID);
 
 	timer_init();
+	profiling_setup();
 	setup_notification();
 	ptdev_init();
 
@@ -566,6 +567,8 @@ static void cpu_secondary_post(void)
 	interrupt_init(get_cpu_id());
 
 	timer_init();
+
+	profiling_setup();
 
 	/* Wait for boot processor to signal all secondary cores to continue */
 	wait_sync_change(&pcpu_sync, 0UL);

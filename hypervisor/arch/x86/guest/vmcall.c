@@ -181,6 +181,12 @@ int vmcall_vmexit_handler(struct vcpu *vcpu)
 		ret = hcall_save_restore_sworld_ctx(vcpu);
 		break;
 
+#ifdef HV_DEBUG
+	case HC_PROFILING_OPS:
+		ret = hcall_profiling_ops(vm, param1, param2);
+		break;
+#endif
+
 	default:
 		pr_err("op %d: Invalid hypercall\n", hypcall_id);
 		ret = -EPERM;

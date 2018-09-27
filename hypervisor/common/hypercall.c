@@ -995,3 +995,45 @@ int32_t hcall_get_cpu_pm_state(struct vm *vm, uint64_t cmd, uint64_t param)
 
 	}
 }
+
+
+int64_t hcall_profiling_ops(struct vm *vm, uint64_t cmd, uint64_t param)
+{
+	uint64_t hva;
+
+	pr_info("%s: cmd=%llu, param=0x%llx\n", __func__, cmd, param);
+
+	if (param) {
+		hva = (uint64_t)gpa2hva(vm, param);
+	} else {
+		pr_err("%s: profiling param is NULL\n", __func__);
+		return -1;
+	}
+
+	if (hva == 0) {
+		pr_err("%s: Invalid HVA address\n", __func__);
+		return -1;
+	}
+
+	switch (cmd) {
+	case PROFILING_MSR_OPS:
+		return profiling_msr_ops_all_cpus(hva);
+	case PROFILING_GET_VMINFO:
+		return profiling_vm_info_list(hva);
+	case PROFILING_GET_VERSION:
+		return profiling_get_version(hva);
+	case PROFILING_GET_CONTROL_SWITCH:
+		return profiling_get_control(hva);
+	case PROFILING_SET_CONTROL_SWITCH:
+		return profiling_set_control(hva);
+	case PROFILING_CONFIG_PMI:
+		return profiling_config_pmi(hva);
+	case PROFILING_CONFIG_VMSWITCH:
+		return profiling_config_vmsw(hva);
+	case PROFILING_GET_PCPUID:
+		return profiling_get_pcpuid(hva);
+	default:
+		pr_err("%s: invalid profiling command %llu\n", __func__, cmd);
+		return -1;
+	}
+}

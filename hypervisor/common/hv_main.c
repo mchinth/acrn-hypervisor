@@ -68,6 +68,8 @@ void vcpu_thread(struct vcpu *vcpu)
 #endif
 		TRACE_2L(TRACE_VM_ENTER, 0UL, 0UL);
 
+		profiling_vmenter_handler(vcpu);
+
 		/* Restore guest TSC_AUX */
 		if (vcpu->launched) {
 			cpu_msr_write(MSR_IA32_TSC_AUX,
@@ -107,6 +109,9 @@ void vcpu_thread(struct vcpu *vcpu)
 #endif
 
 		TRACE_2L(TRACE_VM_EXIT, basic_exit_reason, vcpu_get_rip(vcpu));
+
+		profiling_vmexit_handler(vcpu, basic_exit_reason);
+
 	} while (1);
 }
 

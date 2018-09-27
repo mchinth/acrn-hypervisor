@@ -136,6 +136,8 @@ void early_init_lapic(void);
 void init_lapic(uint16_t pcpu_id);
 void send_lapic_eoi(void);
 uint8_t get_cur_lapic_id(void);
+uint32_t read_lapic_reg32(uint32_t offset);
+void write_lapic_reg32(uint32_t offset, uint32_t value);
 void send_startup_ipi(enum intr_cpu_startup_shorthand cpu_startup_shorthand,
 		uint16_t dest_pcpu_id,
 		uint64_t cpu_startup_start_address);
@@ -144,6 +146,10 @@ void send_dest_ipi(uint32_t dest, uint32_t vector, uint32_t dest_mode);
 /* API to send an IPI to a single guest */
 void send_single_ipi(uint16_t pcpu_id, uint32_t vector);
 
+/* API to send IPI with shorthand destination */
+int send_shorthand_ipi(uint8_t vector,
+		uint8_t shorthand,
+		uint8_t delivery_mode);
 void suspend_lapic(void);
 void resume_lapic(void);
 

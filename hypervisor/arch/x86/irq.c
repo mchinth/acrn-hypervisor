@@ -17,10 +17,11 @@ static uint32_t vector_to_irq[NR_MAX_VECTOR + 1];
 
 spurious_handler_t spurious_handler;
 
-#define NR_STATIC_MAPPINGS     (2U)
+#define NR_STATIC_MAPPINGS     (3U)
 static uint32_t irq_static_mappings[NR_STATIC_MAPPINGS][2] = {
 	{TIMER_IRQ, VECTOR_TIMER},
 	{NOTIFY_IRQ, VECTOR_NOTIFY_VCPU},
+	{PMI_IRQ, VECTOR_PMI},
 };
 
 /*
@@ -93,7 +94,7 @@ uint32_t alloc_irq_vector(uint32_t irq)
 	}
 
 	desc = &irq_desc_array[irq];
-	
+
 	if (desc->vector != VECTOR_INVALID) {
 		if (vector_to_irq[desc->vector] == irq) {
 			/* statically binded */
@@ -118,7 +119,7 @@ uint32_t alloc_irq_vector(uint32_t irq)
 			}
 		}
 		vr = (vr > VECTOR_DYNAMIC_END) ? VECTOR_INVALID : vr;
-		
+
 		spinlock_irqrestore_release(&irq_alloc_spinlock, rflags);
 	}
 
@@ -345,6 +346,10 @@ void dispatch_interrupt(struct intr_excp_ctx *ctx)
 		irq_alloc_bitmap + (irq >> 6U)) == 0U) {
 		/* mask irq if possible */
 		goto ERR;
+	}
+
+	if (vr == VECTOR_PMI) {
+		profiling_capture_intr_context(ctx);
 	}
 
 	handle_irq(desc);
