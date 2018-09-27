@@ -227,6 +227,16 @@ struct sep_state {
 	uint64_t saved_debugctl_value;
 } __aligned(8);
 
+struct data_header {
+	int32_t collector_id;
+	uint16_t cpu_id;
+	uint16_t data_type;
+	uint64_t tsc;
+	uint64_t payload_size;
+	uint64_t reserved;
+} __aligned(SEP_BUF_ENTRY_SIZE);
+
+#define DATA_HEADER_SIZE (sizeof(struct data_header))
 
 struct core_pmu_sample {
 	/* context where PMI is triggered */

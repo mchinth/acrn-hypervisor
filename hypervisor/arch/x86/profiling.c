@@ -187,12 +187,238 @@ void profiling_disable_pmu(void)
 	sepstate->pmu_state = PMU_SETUP;
 }
 
+static inline uint32_t sbuf_next_ptr(uint32_t pos,
+		uint32_t span, uint32_t scope)
+{
+	pos += span;
+	pos = (pos >= scope) ? (pos - scope) : pos;
+	return pos;
+}
+
 /*
- * Read profiling data and transferred to SOS
+ * Writes specified size of data into sbuf
+ */
+static int profiling_sbuf_put_variable(struct shared_buf *sbuf,
+					uint8_t *data, uint32_t size)
+{
+	uint32_t remaining_space, offset, next_tail;
+	void *to;
+
+	/*
+	 * 1. check for null pointers and non-zero size
+	 * 2. check if enough room available in the buffer
+	 *     2a. if not, drop the sample, increment count of dropped samples,
+	 *         return
+	 *     2b. unless overwrite flag is enabled
+	 * 3. Continue if buffer has space for the sample
+	 * 4. Copy sample to buffer
+	 *     4a. Split variable sample to be copied if the sample is going to
+	 *         wrap around the buffer
+	 *     4b. Otherwise do a simple copy
+	 * 5. return number of bytes of data put in buffer
+	 */
+
+	if ((sbuf == NULL) || (data == NULL)) {
+		dev_dbg(ACRN_DBG_PROFILING, "buffer or data not initialized!");
+		return -EINVAL;
+	}
+
+	if (size == 0U) {
+		dev_dbg(ACRN_DBG_PROFILING,
+			"0 bytes reqeusted to be put in buffer!");
+		return 0;
+	}
+
+	if (sbuf->tail >= sbuf->head) {
+		remaining_space = sbuf->size - (sbuf->tail - sbuf->head);
+	} else {
+		remaining_space = sbuf->head - sbuf->tail;
+	}
+
+	if (size >= remaining_space) {
+		/* Only (remaining_space - 1) can be written to sbuf.
+		 * Since if the next_tail equals head, then it is assumed
+		 * that buffer is empty, not full
+		 */
+		dev_dbg(ACRN_DBG_PROFILING,
+		"Not enough space to write data! Returning without writing");
+		return 0;
+	}
+
+	next_tail = sbuf_next_ptr(sbuf->tail, size, sbuf->size);
+	dev_dbg(ACRN_DBG_PROFILING, "sbuf->tail: %llu, next_tail: %llu",
+		sbuf->tail, next_tail);
+
+	to = (void *)sbuf + SBUF_HEAD_SIZE + sbuf->tail;
+
+	if (next_tail < sbuf->tail) { /* wrap-around */
+		dev_dbg(ACRN_DBG_PROFILING, "wrap-around condition!");
+		offset = sbuf->size - sbuf->tail;
+		memcpy_s(to, offset, data, offset);
+
+		/* 2nd part */
+		to = (void *)sbuf + SBUF_HEAD_SIZE;
+
+		if (size - offset) {
+			memcpy_s(to, size - offset,
+				data + offset, size - offset);
+		}
+	} else {
+		dev_dbg(ACRN_DBG_PROFILING, "non-wrap-around!");
+		memcpy_s(to, size, data, size);
+	}
+
+	sbuf->tail = next_tail;
+
+	return size;
+}
+
+/*
+ * Read profiling data and transfered to SOS
+ * Drop transfer of profiling data if sbuf is full/insufficient and log it
  */
 static int profiling_generate_data(int32_t collector, uint32_t type)
 {
-	/* to be implemented */
+	uint32_t i, remaining_space = 0U;
+	struct data_header pkt_header;
+	uint64_t payload_size = 0U;
+	uint8_t *payload = NULL;
+	struct shared_buf *sbuf = NULL;
+	struct sep_state *sepstate = &(get_cpu_var(sep_info.sep_state));
+	struct sw_msr_op_info *sw_msrop
+		= &(get_cpu_var(sep_info.sw_msr_op_info));
+
+	if (collector == COLLECT_PROFILE_DATA) {
+		sbuf = (struct shared_buf *)
+			get_cpu_var(sbuf)[ACRN_SEP];
+
+		if (sbuf == NULL) {
+			sepstate->samples_dropped++;
+			return 0;
+		}
+
+		if (sepstate->pmu_state == PMU_RUNNING) {
+			if (sbuf->tail >= sbuf->head) {
+				remaining_space = sbuf->size
+						- (sbuf->tail - sbuf->head);
+			} else {
+				remaining_space = sbuf->head - sbuf->tail;
+			}
+
+			/* populate the data header */
+			pkt_header.tsc = rdtsc();
+			pkt_header.collector_id = collector;
+			pkt_header.cpu_id = get_cpu_id();
+			pkt_header.data_type = (uint16_t) (1U << type);
+
+			switch (type) {
+			case CORE_PMU_SAMPLING:
+				payload_size = CORE_PMU_SAMPLE_SIZE;
+				payload = (uint8_t *)
+					&get_cpu_var(sep_info.pmu_sample);
+				break;
+			case LBR_PMU_SAMPLING:
+				payload_size = CORE_PMU_SAMPLE_SIZE
+					+ LBR_PMU_SAMPLE_SIZE;
+				payload = (uint8_t *)
+					&get_cpu_var(sep_info.pmu_sample);
+				break;
+			case VM_SWITCH_TRACING:
+				payload_size = VM_SWITCH_TRACE_SIZE;
+				payload = (uint8_t *)
+					&get_cpu_var(sep_info.vm_switch_trace);
+				break;
+			default:
+				pr_err("%s: unknown data type %u on cpu %d",
+					__func__, type, get_cpu_id());
+				return 0;
+			}
+
+			pkt_header.payload_size = payload_size;
+
+			if ((uint64_t)remaining_space < DATA_HEADER_SIZE + payload_size) {
+				sepstate->samples_dropped++;
+				return 0;
+			}
+
+			uint32_t tmp_size
+				= (DATA_HEADER_SIZE-1)/SEP_BUF_ENTRY_SIZE+1;
+
+			for (i = 0U; i < tmp_size; i++) {
+				sbuf_put(sbuf, (uint8_t *)
+					&pkt_header+i*SEP_BUF_ENTRY_SIZE);
+			}
+
+			tmp_size = (uint32_t)(payload_size - 1) / SEP_BUF_ENTRY_SIZE + 1;
+			for (i = 0U; i < tmp_size; i++) {
+				sbuf_put(sbuf, (uint8_t *)payload+i*SEP_BUF_ENTRY_SIZE);
+			}
+
+			sepstate->samples_logged++;
+		}
+	} else if (collector == COLLECT_POWER_DATA) {
+
+		sbuf = (struct shared_buf *)
+				get_cpu_var(sbuf)[ACRN_SOCWATCH];
+
+		if (sbuf == NULL) {
+			dev_dbg(ACRN_DBG_PROFILING,
+			"%s: socwatch buffers not initialized?", __func__);
+			return 0;
+		}
+
+		if (sbuf->tail >= sbuf->head) {
+			remaining_space
+				= sbuf->size - (sbuf->tail - sbuf->head);
+		} else {
+			remaining_space = sbuf->head - sbuf->tail;
+		}
+
+		/* populate the data header */
+		pkt_header.tsc = rdtsc();
+		pkt_header.collector_id = collector;
+		pkt_header.cpu_id = get_cpu_id();
+		pkt_header.data_type = (uint16_t)type;
+
+		switch (type) {
+		case SOCWATCH_MSR_OP:
+			dev_dbg(ACRN_DBG_PROFILING,
+				"%s: generating cstate/pstate sample socwatch cpu %d",
+				__func__, sw_msrop->cpu_id);
+			pkt_header.cpu_id = sw_msrop->cpu_id;
+			pkt_header.data_type = sw_msrop->sample_id;
+			payload_size
+				= (sw_msrop->valid_entries * sizeof(uint64_t));
+			payload = (uint8_t *)&(sw_msrop->core_msr[0]);
+			break;
+
+		case SOCWATCH_VM_SWITCH_TRACING:
+			dev_dbg(ACRN_DBG_PROFILING,
+				"%s: generating vm-switch sample", __func__);
+			payload_size = VM_SWITCH_TRACE_SIZE;
+			payload = (uint8_t *)
+					&get_cpu_var(sep_info.vm_switch_trace);
+			break;
+		default:
+			pr_err("%s: unknown data type %u on cpu %d",
+				__func__, type, get_cpu_id());
+			return 0;
+		}
+
+		pkt_header.payload_size = payload_size;
+
+		if ((DATA_HEADER_SIZE + payload_size) >= (uint64_t)remaining_space) {
+			pr_err("%s: not enough space in socwatch buffer on cpu %d",
+				__func__, get_cpu_id());
+			return 0;
+		}
+		/* copy header */
+		profiling_sbuf_put_variable(sbuf,
+			(uint8_t *)&pkt_header, DATA_HEADER_SIZE);
+		/* copy payload */
+		profiling_sbuf_put_variable(sbuf,
+			(uint8_t *)payload, payload_size);
+	}
 	return 0;
 }
 
