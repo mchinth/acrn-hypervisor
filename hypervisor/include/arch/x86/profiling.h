@@ -7,6 +7,9 @@
 #ifndef PROFILING_H
 #define PROFILING_H
 
+#define MAX_NR_VCPUS			8
+#define MAX_NR_VMS				6
+
 #define MAX_MSR_LIST_NUM		15U
 #define MAX_GROUP_NUM			1U
 
@@ -97,6 +100,51 @@ struct profiling_msr_ops_list {
 	uint32_t	num_entries;
 	int32_t		msr_op_state;
 	struct profiling_msr_op entries[MAX_MSR_LIST_NUM];
+} __aligned(8);
+
+struct profiling_pmi_config {
+	uint32_t num_groups;
+	uint32_t trigger_count;
+	struct profiling_msr_op initial_list[MAX_GROUP_NUM][MAX_MSR_LIST_NUM];
+	struct profiling_msr_op start_list[MAX_GROUP_NUM][MAX_MSR_LIST_NUM];
+	struct profiling_msr_op stop_list[MAX_GROUP_NUM][MAX_MSR_LIST_NUM];
+	struct profiling_msr_op entry_list[MAX_GROUP_NUM][MAX_MSR_LIST_NUM];
+	struct profiling_msr_op exit_list[MAX_GROUP_NUM][MAX_MSR_LIST_NUM];
+} __aligned(8);
+
+struct profiling_vmsw_config {
+	int32_t collector_id;
+	struct profiling_msr_op initial_list[MAX_MSR_LIST_NUM];
+	struct profiling_msr_op entry_list[MAX_MSR_LIST_NUM];
+	struct profiling_msr_op exit_list[MAX_MSR_LIST_NUM];
+} __aligned(8);
+
+struct profiling_vcpu_pcpu_map {
+	int32_t vcpu_id;
+	int32_t pcpu_id;
+	int32_t apic_id;
+} __aligned(8);
+
+struct profiling_vm_info {
+	int32_t		vm_id;
+	unsigned char	guid[16];
+	char		vm_name[16];
+	int32_t		num_vcpus;
+	struct profiling_vcpu_pcpu_map	cpu_map[MAX_NR_VCPUS];
+} __aligned(8);
+
+struct profiling_vm_info_list {
+	int32_t num_vms;
+	struct profiling_vm_info vm_list[MAX_NR_VMS];
+} __aligned(8);
+
+struct profiling_pcpuid {
+	uint32_t leaf;
+	uint32_t subleaf;
+	uint32_t eax;
+	uint32_t ebx;
+	uint32_t ecx;
+	uint32_t edx;
 } __aligned(8);
 
 struct vmexit_msr {

@@ -290,7 +290,6 @@ void profiling_handle_msrops(void)
 		__func__, get_cpu_id());
 }
 
-
 /*
  * Performs MSR operations on all the CPU's
  */
@@ -323,7 +322,57 @@ int profiling_msr_ops_all_cpus(uint64_t addr)
  */
 int profiling_vm_info_list(uint64_t addr)
 {
-	/* to be implemented */
+	struct list_head *pos;
+	struct vm *vm;
+	struct vcpu *vcpu;
+	int i, vm_idx;
+	struct profiling_vm_info_list *vm_info_list
+			= (struct profiling_vm_info_list *)addr;
+
+	dev_dbg(ACRN_DBG_PROFILING, "%s: entering", __func__);
+
+	if (vm_info_list == NULL) {
+		return -EINVAL;
+	}
+
+	vm_idx = 0;
+	vm_info_list->vm_list[vm_idx].vm_id = 0xFFFFFFFFU;
+	memcpy_s(vm_info_list->vm_list[vm_idx].vm_name, 4, "VMM\0", 4);
+	for (i = 0; i < phys_cpu_num; i++) {
+		vm_info_list->vm_list[vm_idx].cpu_map[i].vcpu_id = i;
+		vm_info_list->vm_list[vm_idx].cpu_map[i].pcpu_id = i;
+		vm_info_list->vm_list[vm_idx].cpu_map[i].apic_id
+			= per_cpu(lapic_id, i);
+	}
+	vm_info_list->vm_list[vm_idx].num_vcpus = i;
+	vm_info_list->num_vms = 1;
+
+	spinlock_obtain(&vm_list_lock);
+	list_for_each(pos, &vm_list) {
+		i = 0;
+
+		vm = list_entry(pos, struct vm, list);
+
+		vm_info_list->num_vms++;
+		vm_idx++;
+
+		vm_info_list->vm_list[vm_idx].vm_id = vm->vm_id;
+		memcpy_s(vm_info_list->vm_list[vm_idx].guid, 16, vm->GUID, 16);
+		snprintf(vm_info_list->vm_list[vm_idx].vm_name, 16, "%vm_%d",
+				vm->vm_id, 16);
+		vm_info_list->vm_list[vm_idx].num_vcpus = 0;
+		foreach_vcpu(i, vm, vcpu) {
+			vm_info_list->vm_list[vm_idx].cpu_map[i].vcpu_id
+					= vcpu->vcpu_id;
+			vm_info_list->vm_list[vm_idx].cpu_map[i].pcpu_id
+					= vcpu->pcpu_id;
+			vm_info_list->vm_list[vm_idx].cpu_map[i].apic_id = 0;
+			vm_info_list->vm_list[vm_idx].num_vcpus++;
+		}
+	}
+	spinlock_release(&vm_list_lock);
+
+	dev_dbg(ACRN_DBG_PROFILING, "%s: exiting", __func__);
 	return 0;
 }
 
@@ -359,7 +408,70 @@ int profiling_set_control(uint64_t addr)
  */
 int profiling_config_pmi(uint64_t addr)
 {
-	/* to be implemented */
+	unsigned int i;
+	struct profiling_pmi_config *pmi_config
+			= (struct profiling_pmi_config *)addr;
+
+	dev_dbg(ACRN_DBG_PROFILING, "%s: entering", __func__);
+
+	if (pmi_config == NULL) {
+		pr_err("%s: pmi_config is NULL!", __func__);
+		return -EINVAL;
+	}
+
+	for (i = 0U; i < (uint32_t)phys_cpu_num; i++) {
+		if (!((per_cpu(sep_info.sep_state, i).pmu_state ==
+				PMU_INITIALIZED) ||
+			(per_cpu(sep_info.sep_state, i).pmu_state ==
+				PMU_SETUP))) {
+			pr_err("%s: invalid pmu_state %u on cpu%d",
+			__func__, get_cpu_var(sep_info.sep_state).pmu_state, i);
+			return -EINVAL;
+		}
+	}
+
+	if (pmi_config->num_groups == 0U ||
+		pmi_config->num_groups > MAX_GROUP_NUM) {
+		pr_err("%s: invalid num_groups %u",
+			__func__, pmi_config->num_groups);
+		return -EINVAL;
+	}
+
+	for (i = 0U; i < (uint32_t)phys_cpu_num; i++) {
+		per_cpu(sep_info.ipi_cmd, i) = IPI_PMU_CONFIG;
+		per_cpu(sep_info.sep_state, i).num_pmi_groups
+			= pmi_config->num_groups;
+
+		memcpy_s(per_cpu(sep_info.sep_state, i).pmi_initial_msr_list,
+		sizeof(struct profiling_msr_op)*MAX_MSR_LIST_NUM*MAX_GROUP_NUM,
+		pmi_config->initial_list,
+		sizeof(struct profiling_msr_op)*MAX_MSR_LIST_NUM*MAX_GROUP_NUM);
+
+		memcpy_s(per_cpu(sep_info.sep_state, i).pmi_start_msr_list,
+		sizeof(struct profiling_msr_op)*MAX_MSR_LIST_NUM*MAX_GROUP_NUM,
+		pmi_config->start_list,
+		sizeof(struct profiling_msr_op)*MAX_MSR_LIST_NUM*MAX_GROUP_NUM);
+
+		memcpy_s(per_cpu(sep_info.sep_state, i).pmi_stop_msr_list,
+		sizeof(struct profiling_msr_op)*MAX_MSR_LIST_NUM*MAX_GROUP_NUM,
+		pmi_config->stop_list,
+		sizeof(struct profiling_msr_op)*MAX_MSR_LIST_NUM*MAX_GROUP_NUM);
+
+		memcpy_s(per_cpu(sep_info.sep_state, i).pmi_entry_msr_list,
+		sizeof(struct profiling_msr_op)*MAX_MSR_LIST_NUM*MAX_GROUP_NUM,
+		pmi_config->entry_list,
+		sizeof(struct profiling_msr_op)*MAX_MSR_LIST_NUM*MAX_GROUP_NUM);
+
+		memcpy_s(per_cpu(sep_info.sep_state, i).pmi_exit_msr_list,
+		sizeof(struct profiling_msr_op)*MAX_MSR_LIST_NUM*MAX_GROUP_NUM,
+		pmi_config->exit_list,
+		sizeof(struct profiling_msr_op)*MAX_MSR_LIST_NUM*MAX_GROUP_NUM);
+	}
+
+	send_shorthand_ipi(VECTOR_NOTIFY_VCPU, INTR_LAPIC_ICR_ALL_EX_SELF,
+			INTR_LAPIC_ICR_FIXED);
+
+	dev_dbg(ACRN_DBG_PROFILING, "%s: exiting", __func__);
 	return 0;
 }
 
@@ -368,7 +480,54 @@ int profiling_config_pmi(uint64_t addr)
  */
 int profiling_config_vmsw(uint64_t addr)
 {
-	/* to be implemented */
+	unsigned int i;
+	struct profiling_vmsw_config *vmsw_config
+			= (struct profiling_vmsw_config *)addr;
+
+	dev_dbg(ACRN_DBG_PROFILING, "%s: entering", __func__);
+
+	if (vmsw_config == NULL) {
+		pr_err("%s: vmsw_config is NULL!", __func__);
+		return -EINVAL;
+	}
+
+	switch (vmsw_config->collector_id) {
+	case COLLECT_PROFILE_DATA:
+		for (i = 0; i < (uint32_t)phys_cpu_num; i++) {
+			per_cpu(sep_info.ipi_cmd, i) = IPI_VMSW_CONFIG;
+
+			memcpy_s(
+			per_cpu(sep_info.sep_state, i).vmsw_initial_msr_list,
+			sizeof(struct profiling_msr_op)*MAX_MSR_LIST_NUM,
+			vmsw_config->initial_list,
+			sizeof(struct profiling_msr_op)*MAX_MSR_LIST_NUM);
+
+			memcpy_s(
+			per_cpu(sep_info.sep_state, i).vmsw_entry_msr_list,
+			sizeof(struct profiling_msr_op)*MAX_MSR_LIST_NUM,
+			vmsw_config->entry_list,
+			sizeof(struct profiling_msr_op)*MAX_MSR_LIST_NUM);
+
+			memcpy_s(
+			per_cpu(sep_info.sep_state, i).vmsw_exit_msr_list,
+			sizeof(struct profiling_msr_op)*MAX_MSR_LIST_NUM,
+			vmsw_config->exit_list,
+			sizeof(struct profiling_msr_op)*MAX_MSR_LIST_NUM);
+		}
+
+		send_shorthand_ipi(VECTOR_NOTIFY_VCPU, INTR_LAPIC_ICR_ALL_EX_SELF,
+				INTR_LAPIC_ICR_FIXED);
+
+		break;
+	case COLLECT_POWER_DATA:
+		break;
+	default:
+		pr_err("%s: unknown collector %d",
+			__func__, vmsw_config->collector_id);
+		return -EINVAL;
+	}
+
+	dev_dbg(ACRN_DBG_PROFILING, "%s: exiting", __func__);
 	return 0;
 }
 
@@ -377,11 +536,24 @@ int profiling_config_vmsw(uint64_t addr)
  */
 int profiling_get_pcpuid(uint64_t addr)
 {
-	/* to be implemented */
+	struct profiling_pcpuid *pcpuid
+			= (struct profiling_pcpuid *)addr;
+	dev_dbg(ACRN_DBG_PROFILING, "%s: entering", __func__);
+
+	if (pcpuid == NULL) {
+		return -EINVAL;
+	}
+
+	cpuid_subleaf(pcpuid->leaf, pcpuid->subleaf, &pcpuid->eax,
+			&pcpuid->ebx, &pcpuid->ecx, &pcpuid->edx);
+
+	dev_dbg(ACRN_DBG_PROFILING, "%s: exiting", __func__);
+
 	return 0;
 }
 
 #ifdef HV_DEBUG
+
 /*
  * IPI interrupt handler function
  */
@@ -501,7 +673,7 @@ void profiling_capture_intr_context(struct intr_excp_ctx *ctx)
 }
 
 /*
- * Setup IPI and PMI irq vectors
+ * Setup PMI irq vectors
  */
 void profiling_setup(void)
 {
