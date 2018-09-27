@@ -16,6 +16,8 @@
 #define COLLECT_PROFILE_DATA	0
 #define COLLECT_POWER_DATA		1
 
+#define SEP_BUF_ENTRY_SIZE		32U
+
 #define SOCWATCH_MSR_OP			100U
 
 enum MSR_CMD_STATUS {
@@ -225,6 +227,55 @@ struct sep_state {
 	uint64_t saved_debugctl_value;
 } __aligned(8);
 
+
+struct core_pmu_sample {
+	/* context where PMI is triggered */
+	uint32_t	os_id;
+	/* the task id */
+	uint32_t	task_id;
+	/* instruction pointer */
+	uint64_t	rip;
+	/* the task name */
+	char		task[16];
+	/* physical cpu ID */
+	uint32_t	cpu_id;
+	/* the process id */
+	uint32_t	process_id;
+	/* perf global status msr value (for overflow status) */
+	uint64_t	overflow_status;
+	/* rflags */
+	uint32_t	rflags;
+	/* code segment */
+	uint32_t	cs;
+} __aligned(SEP_BUF_ENTRY_SIZE);
+
+#define CORE_PMU_SAMPLE_SIZE (sizeof(struct core_pmu_sample))
+
+#define NUM_LBR_ENTRY		32
+
+struct lbr_pmu_sample {
+	/* LBR TOS */
+	uint64_t	lbr_tos;
+	/* LBR FROM IP */
+	uint64_t	lbr_from_ip[NUM_LBR_ENTRY];
+	/* LBR TO IP */
+	uint64_t	lbr_to_ip[NUM_LBR_ENTRY];
+	/* LBR info */
+	uint64_t	lbr_info[NUM_LBR_ENTRY];
+} __aligned(SEP_BUF_ENTRY_SIZE);
+
+#define LBR_PMU_SAMPLE_SIZE (sizeof(struct lbr_pmu_sample))
+
+struct pmu_sample {
+	/* core pmu sample */
+	struct core_pmu_sample	csample;
+	/* lbr pmu sample */
+	struct lbr_pmu_sample	lsample;
+} __aligned(SEP_BUF_ENTRY_SIZE);
+
+
+#define PMU_SAMPLE_SIZE (sizeof(struct pmu_sample))
+
 struct vm_switch_trace {
 	int32_t  os_id;
 	uint64_t vmenter_tsc;
@@ -241,6 +292,7 @@ struct sep_profiling_wrapper {
 	struct guest_vm_info		vm_info;
 	struct vmm_ctx_info		vmm_ctx;
 	ipi_commands			ipi_cmd;
+	struct pmu_sample		pmu_sample;
 	struct vm_switch_trace	vm_switch_trace;
 	socwatch_state			socwatch_state;
 	struct sw_msr_op_info		sw_msr_op_info;

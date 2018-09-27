@@ -16,6 +16,9 @@
 #define MAJOR_VERSION			1
 #define MINOR_VERSION			0
 
+#define LBR_NUM_REGISTERS		32U
+
+#define PERF_OVF_BIT_MASK		0xC0000070000000FULL
 #define LVT_PERFCTR_BIT_UNMASK		0xFFFEFFFFU
 #define LVT_PERFCTR_BIT_MASK		0x10000U
 #define VALID_DEBUGCTL_BIT_MASK		0x1801U
@@ -25,6 +28,7 @@ static uint64_t		socwatch_collection_switch;
 static bool			in_pmu_profiling;
 
 static uint32_t profiling_pmi_irq = IRQ_INVALID;
+
 void profiling_initialize_vmsw(void)
 {
 	dev_dbg(ACRN_DBG_PROFILING, "%s: entering cpu%d",
@@ -336,7 +340,134 @@ int profiling_pmi_request_irq(int cpu, irq_action_t func,
  */
 static int profiling_pmi_handler(__unused int irq, __unused void *data)
 {
-	/* To be implemented */
+	uint64_t perf_ovf_status;
+	uint32_t lvt_perf_ctr;
+	unsigned int i;
+	uint32_t group_id;
+	struct profiling_msr_op *msrop = NULL;
+	struct pmu_sample *psample = &get_cpu_var(sep_info.pmu_sample);
+	struct sep_state *sepstate = &(get_cpu_var(sep_info.sep_state));
+
+	/* Stop all the counters first */
+	msr_write(MSR_IA32_PERF_GLOBAL_CTRL, 0x0U);
+
+	group_id = sepstate->current_pmi_group_id;
+	for (i = 0U; i < MAX_MSR_LIST_NUM; i++) {
+		msrop = &(sepstate->pmi_entry_msr_list[group_id][i]);
+		if (msrop->msr_id == (int32_t) -1) {
+			break;
+		}
+		if (msrop->op_type == MSR_OP_WRITE) {
+			msr_write(msrop->msr_id, msrop->value);
+		}
+	}
+
+	sepstate->total_pmi_count++;
+	perf_ovf_status = msr_read(MSR_IA32_PERF_GLOBAL_STATUS);
+	lvt_perf_ctr = read_lapic_reg32(LAPIC_LVT_PMC_REGISTER);
+
+	if (!perf_ovf_status) {
+		goto reconfig;
+	}
+
+	if (!(perf_ovf_status & 0x80000000000000FULL)) {
+		sepstate->nofrozen_pmi++;
+	}
+
+	memset(psample, 0, sizeof(struct pmu_sample));
+
+	/* Attribute PMI to guest context */
+	if ((get_cpu_var(sep_info.vm_info).vmexit_reason
+			== VMX_EXIT_REASON_EXTERNAL_INTERRUPT) &&
+			(get_cpu_var(sep_info.vm_info).external_vector
+			== VECTOR_PMI)) {
+		psample->csample.os_id = (uint32_t) get_cpu_var(sep_info.vm_info).vm_id;
+		memset(psample->csample.task, 0, 16);
+		psample->csample.cpu_id = get_cpu_id();
+		psample->csample.process_id = 0U;
+		psample->csample.task_id = 0U;
+		psample->csample.overflow_status = perf_ovf_status;
+		psample->csample.rip = get_cpu_var(sep_info.vm_info).guest_rip;
+		psample->csample.rflags
+			= (uint32_t) get_cpu_var(sep_info.vm_info).guest_rflags;
+		psample->csample.cs = (uint32_t) get_cpu_var(sep_info.vm_info).guest_cs;
+		get_cpu_var(sep_info.vm_info).vmexit_reason = 0U;
+		get_cpu_var(sep_info.vm_info).external_vector = -1;
+	/* Attribute PMI to hypervisor context */
+	} else {
+		psample->csample.os_id = 0xFFFFFFFFU;
+		memcpy_s(psample->csample.task, 16, "VMM\0", 4);
+		psample->csample.cpu_id = get_cpu_id();
+		psample->csample.process_id = 0U;
+		psample->csample.task_id = 0U;
+		psample->csample.overflow_status = perf_ovf_status;
+		psample->csample.rip = get_cpu_var(sep_info.vmm_ctx).rip;
+		psample->csample.rflags
+			= (uint32_t) get_cpu_var(sep_info.vmm_ctx).rflags;
+		psample->csample.cs = (uint32_t) get_cpu_var(sep_info.vmm_ctx).cs;
+	}
+
+	if (sep_collection_switch & (1 << LBR_PMU_SAMPLING)) {
+		psample->lsample.lbr_tos = msr_read(MSR_CORE_LASTBRANCH_TOS);
+		for (i = 0U; i < LBR_NUM_REGISTERS; i++) {
+			psample->lsample.lbr_from_ip[i]
+				= msr_read(MSR_CORE_LASTBRANCH_0_FROM_IP + i);
+			psample->lsample.lbr_to_ip[i]
+				= msr_read(MSR_CORE_LASTBRANCH_0_TO_IP + i);
+		}
+		/* Generate core pmu sample and lbr data */
+		profiling_generate_data(COLLECT_PROFILE_DATA, LBR_PMU_SAMPLING);
+	} else {
+		/* Generate core pmu sample only */
+		profiling_generate_data(COLLECT_PROFILE_DATA, CORE_PMU_SAMPLING);
+	}
+
+	/* Clear PERF_GLOBAL_OVF_STATUS bits */
+	msr_write(MSR_IA32_PERF_GLOBAL_OVF_CTRL,
+			perf_ovf_status & PERF_OVF_BIT_MASK);
+
+	sepstate->valid_pmi_count++;
+
+	group_id = sepstate->current_pmi_group_id;
+	for (i = 0U; i < MAX_MSR_LIST_NUM; i++) {
+		msrop = &(sepstate->pmi_exit_msr_list[group_id][i]);
+		if (msrop->msr_id == (int32_t)-1) {
+			break;
+		}
+		if (msrop->op_type == MSR_OP_WRITE) {
+			if (msrop->reg_type != PMU_MSR_DATA) {
+				if ((uint32_t)msrop->msr_id
+					!= MSR_IA32_PERF_GLOBAL_CTRL) {
+					msr_write(msrop->msr_id, msrop->value);
+				}
+			} else if ((perf_ovf_status >> msrop->param) & 0x1U) {
+				msr_write(msrop->msr_id, msrop->value);
+			}
+		}
+	}
+
+reconfig:
+
+	if (sepstate->pmu_state == PMU_RUNNING) {
+		/* Unmask the interrupt */
+		lvt_perf_ctr &= LVT_PERFCTR_BIT_UNMASK;
+		write_lapic_reg32(LAPIC_LVT_PMC_REGISTER, lvt_perf_ctr);
+		group_id = sepstate->current_pmi_group_id;
+		for (i = 0U; i < MAX_MSR_LIST_NUM; i++) {
+			msrop = &(sepstate->pmi_start_msr_list[group_id][i]);
+			if (msrop->msr_id == (int32_t)-1) {
+				break;
+			}
+			if (msrop->op_type == MSR_OP_WRITE) {
+				msr_write(msrop->msr_id, msrop->value);
+			}
+		}
+	} else {
+		/* Mask the interrupt */
+		lvt_perf_ctr |= LVT_PERFCTR_BIT_MASK;
+		write_lapic_reg32(LAPIC_LVT_PMC_REGISTER, lvt_perf_ctr);
+	}
+
 	return 0;
 }
 
