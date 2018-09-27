@@ -13,6 +13,8 @@
 #define COLLECT_PROFILE_DATA	0
 #define COLLECT_POWER_DATA		1
 
+#define SOCWATCH_MSR_OP			100U
+
 enum MSR_CMD_STATUS {
 	MSR_OP_READY = 0,
 	MSR_OP_REQUESTED,
@@ -50,11 +52,34 @@ typedef enum SEP_PMU_STATE {
 	PMU_UNKNOWN
 } sep_pmu_state;
 
+typedef enum PROFILING_SEP_FEATURE {
+	CORE_PMU_SAMPLING = 0U,
+	CORE_PMU_COUNTING,
+	PEBS_PMU_SAMPLING,
+	LBR_PMU_SAMPLING,
+	UNCORE_PMU_SAMPLING,
+	VM_SWITCH_TRACING,
+	MAX_SEP_FEATURE_ID
+} profiling_sep_feature;
+
 typedef enum SOCWATCH_STATE {
 	SW_SETUP,
 	SW_RUNNING,
 	SW_STOPPED
 } socwatch_state;
+
+typedef enum PROFILING_SOCWATCH_FEATURE {
+	SOCWATCH_COMMAND = 0U,
+	SOCWATCH_VM_SWITCH_TRACING,
+	MAX_SOCWATCH_FEATURE_ID
+} profiling_socwatch_feature;
+
+struct sw_msr_op_info {
+	uint32_t cpu_id;
+	uint16_t sample_id;
+	uint32_t valid_entries;
+	uint64_t core_msr[MAX_MSR_LIST_NUM];
+} __aligned(32);
 
 struct profiling_msr_op {
 	/* MSR address to read/write; last entry will have value of -1 */
@@ -79,6 +104,23 @@ struct vmexit_msr {
 	uint32_t reserved;
 	uint64_t msr_data;
 } __aligned(16);
+
+struct guest_vm_info {
+	int		vm_id;
+	uint64_t	vmenter_tsc;
+	uint64_t	vmexit_tsc;
+	uint64_t	vmexit_reason;
+	int		external_vector;
+	uint64_t	guest_rip;
+	uint64_t	guest_rflags;
+	uint64_t	guest_cs;
+} __aligned(8);
+
+struct vmm_ctx_info {
+	uint64_t rip;
+	uint64_t rflags;
+	uint64_t cs;
+} __aligned(8);
 
 struct sep_state {
 	sep_pmu_state pmu_state;
@@ -133,10 +175,14 @@ struct vm_switch_trace {
  * Wrapper containing  SEP sampling/profiling related data structures
  */
 struct sep_profiling_wrapper {
+	struct profiling_msr_ops_list	*msr_node;
 	struct sep_state		sep_state;
+	struct guest_vm_info		vm_info;
+	struct vmm_ctx_info		vmm_ctx;
 	ipi_commands			ipi_cmd;
 	struct vm_switch_trace	vm_switch_trace;
 	socwatch_state			socwatch_state;
+	struct sw_msr_op_info		sw_msr_op_info;
 };
 
 #define VM_SWITCH_TRACE_SIZE (sizeof(struct vm_switch_trace))

@@ -17,6 +17,9 @@
 #define LVT_PERFCTR_BIT_MASK		0x10000U
 #define VALID_DEBUGCTL_BIT_MASK		0x1801U
 
+static uint64_t		sep_collection_switch;
+static uint64_t		socwatch_collection_switch;
+
 void profiling_initialize_vmsw(void)
 {
 	dev_dbg(ACRN_DBG_PROFILING, "%s: entering cpu%d",
@@ -176,19 +179,142 @@ void profiling_disable_pmu(void)
 }
 
 /*
+ * Read profiling data and transferred to SOS
+ */
+static int profiling_generate_data(int32_t collector, uint32_t type)
+{
+	/* to be implemented */
+	return 0;
+}
+
+/*
  * Performs MSR operations - read, write and clear
  */
 void profiling_handle_msrops(void)
 {
-	/* to be implemented */
+	unsigned int i, j;
+	struct profiling_msr_ops_list *my_msr_node;
+	struct sw_msr_op_info *sw_msrop
+		= &(get_cpu_var(sep_info.sw_msr_op_info));
+
+	dev_dbg(ACRN_DBG_PROFILING, "%s: entering cpu%d",
+		__func__, get_cpu_id());
+
+	my_msr_node = get_cpu_var(sep_info.msr_node);
+
+	if (my_msr_node == NULL ||
+		my_msr_node->msr_op_state != MSR_OP_REQUESTED) {
+		dev_dbg(ACRN_DBG_PROFILING, "%s: invalid my_msr_node on cpu%d",
+			__func__, get_cpu_id());
+		return;
+	}
+
+	if (my_msr_node->num_entries == 0U
+		|| my_msr_node->num_entries >= MAX_MSR_LIST_NUM) {
+		dev_dbg(ACRN_DBG_PROFILING,
+		"%s: invalid num_entries on cpu%d",
+		__func__, get_cpu_id());
+		return;
+	}
+
+	for (i = 0U; i < my_msr_node->num_entries; i++) {
+		switch (my_msr_node->entries[i].op_type) {
+		case MSR_OP_READ:
+			my_msr_node->entries[i].value
+				= msr_read(my_msr_node->entries[i].msr_id);
+
+			dev_dbg(ACRN_DBG_PROFILING,
+			"%s: MSRREAD cpu%d, msr_id=0x%x, msr_val=0x%llx",
+			__func__, get_cpu_id(),	my_msr_node->entries[i].msr_id,
+			my_msr_node->entries[i].value);
+			break;
+		case MSR_OP_READ_CLEAR:
+			my_msr_node->entries[i].value
+				= msr_read(my_msr_node->entries[i].msr_id);
+
+			dev_dbg(ACRN_DBG_PROFILING,
+			"%s: MSRREADCLEAR cpu%d, msr_id=0x%x, msr_val=0x%llx",
+			__func__, get_cpu_id(), my_msr_node->entries[i].msr_id,
+			my_msr_node->entries[i].value);
+			msr_write(my_msr_node->entries[i].msr_id, 0);
+			break;
+		case MSR_OP_WRITE:
+			msr_write(my_msr_node->entries[i].msr_id,
+				my_msr_node->entries[i].value);
+
+			dev_dbg(ACRN_DBG_PROFILING,
+			"%s: MSRWRITE cpu%d, msr_id=0x%x, msr_val=0x%llx",
+			__func__, get_cpu_id(), my_msr_node->entries[i].msr_id,
+			my_msr_node->entries[i].value);
+			break;
+		default:
+			pr_err("%s: unknown MSR op_type %u on cpu %d",
+			__func__, my_msr_node->entries[i].op_type,
+			get_cpu_id());
+		}
+	}
+
+	my_msr_node->msr_op_state = MSR_OP_HANDLED;
+
+	/* Also generates sample */
+	if (my_msr_node->collector_id == COLLECT_POWER_DATA) {
+
+		sw_msrop->cpu_id = get_cpu_id();
+		sw_msrop->valid_entries = my_msr_node->num_entries;
+
+		/*
+		 * if 'param' is 0, then skip generating a sample since it is
+		 * an immediate MSR read operation.
+		 */
+		if (my_msr_node->entries[0].param) {
+			for (j = 0U; j < my_msr_node->num_entries; ++j) {
+				sw_msrop->core_msr[j]
+					= my_msr_node->entries[j].value;
+				/*
+				 * socwatch uses the 'param' field to store the
+				 * sample id needed by socwatch to identify the
+				 * type of sample during post-processing
+				 */
+				sw_msrop->sample_id
+					= my_msr_node->entries[j].param;
+			}
+
+			/* generate sample */
+			profiling_generate_data(COLLECT_POWER_DATA,
+						SOCWATCH_MSR_OP);
+		}
+		my_msr_node->msr_op_state = MSR_OP_REQUESTED;
+	}
+
+	dev_dbg(ACRN_DBG_PROFILING, "%s: exiting cpu%d",
+		__func__, get_cpu_id());
 }
+
 
 /*
  * Performs MSR operations on all the CPU's
  */
 int profiling_msr_ops_all_cpus(uint64_t addr)
 {
-	/* to be implemented */
+	unsigned int i;
+	struct profiling_msr_ops_list *msr_list
+			= (struct profiling_msr_ops_list *)addr;
+
+	dev_dbg(ACRN_DBG_PROFILING, "%s: entering", __func__);
+
+	if (msr_list == NULL) {
+		return -EINVAL;
+	}
+
+	for (i = 0U; i < (uint32_t)phys_cpu_num; i++) {
+		per_cpu(sep_info.ipi_cmd, i) = IPI_MSR_OP;
+		per_cpu(sep_info.msr_node, i) = &(msr_list[i]);
+	}
+
+	send_shorthand_ipi(VECTOR_NOTIFY_VCPU,
+		INTR_LAPIC_ICR_ALL_EX_SELF, INTR_LAPIC_ICR_FIXED);
+
+	dev_dbg(ACRN_DBG_PROFILING, "%s: exiting", __func__);
 	return 0;
 }
 
@@ -292,7 +418,15 @@ int profiling_ipi_handler(void)
  */
 int profiling_vmenter_handler(__unused struct vcpu *vcpu)
 {
-	/* to be implemented */
+	if ((get_cpu_var(sep_info.sep_state).pmu_state == PMU_RUNNING &&
+		sep_collection_switch & (1 << VM_SWITCH_TRACING)) ||
+		(get_cpu_var(sep_info.socwatch_state) == SW_RUNNING &&
+		socwatch_collection_switch &
+		(1 << SOCWATCH_VM_SWITCH_TRACING))) {
+
+		get_cpu_var(sep_info.vm_info).vmenter_tsc = rdtsc();
+	}
+
 	return 0;
 }
 
@@ -301,7 +435,58 @@ int profiling_vmenter_handler(__unused struct vcpu *vcpu)
  */
 int profiling_vmexit_handler(struct vcpu *vcpu, uint64_t exit_reason)
 {
-	/* to be implemented */
+	per_cpu(sep_info.sep_state, vcpu->pcpu_id).total_vmexit_count++;
+
+	if (get_cpu_var(sep_info.sep_state).pmu_state == PMU_RUNNING ||
+		get_cpu_var(sep_info.socwatch_state) == SW_RUNNING) {
+
+		get_cpu_var(sep_info.vm_info).vmexit_tsc = rdtsc();
+		get_cpu_var(sep_info.vm_info).vmexit_reason = exit_reason;
+		if (exit_reason == VMX_EXIT_REASON_EXTERNAL_INTERRUPT) {
+			get_cpu_var(sep_info.vm_info).external_vector
+				= (int)exec_vmread(VMX_EXIT_INT_INFO) & 0xFFU;
+		} else {
+			get_cpu_var(sep_info.vm_info).external_vector = -1;
+		}
+		get_cpu_var(sep_info.vm_info).guest_rip
+			= vcpu->arch_vcpu.contexts[
+				vcpu->arch_vcpu.cur_context].run_ctx.rip;
+
+		get_cpu_var(sep_info.vm_info).guest_rflags
+			= vcpu->arch_vcpu.contexts[
+				vcpu->arch_vcpu.cur_context].run_ctx.rflags;
+
+		get_cpu_var(sep_info.vm_info).guest_cs
+			= vcpu->arch_vcpu.contexts[
+			vcpu->arch_vcpu.cur_context].ext_ctx.cs.selector;
+
+		get_cpu_var(sep_info.vm_info).vm_id = (int) vcpu->vm->vm_id;
+
+		/* Generate vmswitch sample */
+		if ((sep_collection_switch & (1 << VM_SWITCH_TRACING)) ||
+			(socwatch_collection_switch &
+			(1 << SOCWATCH_VM_SWITCH_TRACING))) {
+			get_cpu_var(sep_info.vm_switch_trace).os_id
+				= (int32_t)vcpu->vm->vm_id;
+			get_cpu_var(sep_info.vm_switch_trace).vmenter_tsc
+				= get_cpu_var(sep_info.vm_info).vmenter_tsc;
+			get_cpu_var(sep_info.vm_switch_trace).vmexit_tsc
+				= get_cpu_var(sep_info.vm_info).vmexit_tsc;
+			get_cpu_var(sep_info.vm_switch_trace).vmexit_reason
+				= exit_reason;
+
+			if (sep_collection_switch &
+				(1 << VM_SWITCH_TRACING)) {
+				profiling_generate_data(COLLECT_PROFILE_DATA,
+					VM_SWITCH_TRACING);
+			}
+			if (socwatch_collection_switch &
+				(1 << SOCWATCH_VM_SWITCH_TRACING)) {
+				profiling_generate_data(COLLECT_POWER_DATA,
+					SOCWATCH_VM_SWITCH_TRACING);
+			}
+		}
+	}
 	return 0;
 }
 
@@ -310,7 +495,9 @@ int profiling_vmexit_handler(struct vcpu *vcpu, uint64_t exit_reason)
  */
 void profiling_capture_intr_context(struct intr_excp_ctx *ctx)
 {
-	/* to be implemented */
+	get_cpu_var(sep_info.vmm_ctx).rip = ctx->rip;
+	get_cpu_var(sep_info.vmm_ctx).rflags = ctx->rflags;
+	get_cpu_var(sep_info.vmm_ctx).cs = ctx->cs;
 }
 
 /*
