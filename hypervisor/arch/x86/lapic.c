@@ -132,7 +132,7 @@ static struct lapic_info lapic_info;
 static struct lapic_regs saved_lapic_regs;
 static union lapic_base_msr lapic_base_msr;
 
-static inline uint32_t read_lapic_reg32(uint32_t offset)
+inline uint32_t read_lapic_reg32(uint32_t offset)
 {
 	if (offset < 0x20U || offset > 0x3ffU)
 		return 0;

@@ -18,6 +18,15 @@ static void kick_notification(__unused uint32_t irq, __unused void *data)
 	 */
 	uint16_t pcpu_id = get_cpu_id();
 
+#if defined(HV_DEBUG)
+	uint16_t profiling_ipi = get_cpu_var(sep_info.ipi_cmd);
+
+	if (profiling_ipi > IPI_BEGIN && profiling_ipi < IPI_UNKNOWN) {
+		pr_info("PMI IPI to be handled %d ", profiling_ipi);
+		profiling_ipi_handler();
+	}
+#endif
+
 	if (bitmap_test(pcpu_id, &smp_call_mask)) {
 		struct smp_call_info_data *smp_call =
 			&per_cpu(smp_call_info, pcpu_id);
@@ -26,6 +35,7 @@ static void kick_notification(__unused uint32_t irq, __unused void *data)
 			smp_call->func(smp_call->data);
 		bitmap_clear_nolock(pcpu_id, &smp_call_mask);
 	}
+
 }
 
 void smp_call_function(uint64_t mask, smp_call_func_t func, void *data)
@@ -56,6 +66,7 @@ void smp_call_function(uint64_t mask, smp_call_func_t func, void *data)
 	wait_sync_change(&smp_call_mask, 0UL);
 }
 
+
 static int request_notification_irq(irq_action_t func, void *data)
 {
 	int32_t retval;
@@ -77,6 +88,7 @@ static int request_notification_irq(irq_action_t func, void *data)
 
 	return 0;
 }
+
 
 void setup_notification(void)
 {
