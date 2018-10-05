@@ -348,6 +348,12 @@ void dispatch_interrupt(struct intr_excp_ctx *ctx)
 		goto ERR;
 	}
 
+#ifdef HV_DEBUG
+	if (vr == VECTOR_PMI) {
+		profiling_capture_intr_context(ctx);
+	}
+#endif
+
 	handle_irq(desc);
 	return;
 ERR:

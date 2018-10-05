@@ -80,11 +80,11 @@ typedef enum PROFILING_SOCWATCH_FEATURE {
 } profiling_socwatch_feature;
 
 struct sw_msr_op_info {
-	uint32_t cpu_id;
-	uint16_t sample_id;
-	uint32_t valid_entries;
 	uint64_t core_msr[MAX_MSR_LIST_NUM];
-} __aligned(32);
+	uint32_t cpu_id;
+	uint32_t valid_entries;
+	uint16_t sample_id;
+};
 
 
 struct profiling_msr_op {

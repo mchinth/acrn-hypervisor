@@ -412,8 +412,6 @@ static int profiling_generate_data(int32_t collector, uint32_t type)
 		profiling_sbuf_put_variable(sbuf,
 			(uint8_t *)payload, payload_size);
 	} else {
-		pr_err("%s: unknown collector specified %d",
-			__func__, collector);
 	}
 	return 0;
 }
@@ -534,11 +532,6 @@ static int profiling_pmi_handler(__unused int irq, __unused void *data)
 	struct profiling_msr_op *msrop = NULL;
 	struct pmu_sample *psample = &get_cpu_var(sep_info.pmu_sample);
 	struct sep_state *sepstate = &(get_cpu_var(sep_info.sep_state));
-
-	/* Save the vmm context info */
-	get_cpu_var(sep_info.vmm_ctx).rip = exec_vmread64(VMX_GUEST_RFLAGS);
-	get_cpu_var(sep_info.vmm_ctx).rflags = exec_vmread64(VMX_GUEST_RIP);
-	get_cpu_var(sep_info.vmm_ctx).cs = exec_vmread64(VMX_GUEST_CS_SEL);
 
 	/* Stop all the counters first */
 	msr_write(MSR_IA32_PERF_GLOBAL_CTRL, 0x0U);
@@ -677,7 +670,7 @@ void profiling_start_pmu(void)
 		return;
 	}
 
-	for (i = 0; i < phys_cpu_num; i++) {
+	for (i = 0; i < (int)phys_cpu_num; i++) {
 		if (per_cpu(sep_info.sep_state, i).pmu_state != PMU_SETUP) {
 			pr_err("%s: invalid pmu_state %u on cpu%d",
 			__func__, get_cpu_var(sep_info.sep_state).pmu_state, i);
@@ -685,7 +678,7 @@ void profiling_start_pmu(void)
 		}
 	}
 
-	for (i = 0; i < phys_cpu_num; i++) {
+	for (i = 0; i < (int)phys_cpu_num; i++) {
 		per_cpu(sep_info.ipi_cmd, i) = IPI_PMU_START;
 		per_cpu(sep_info.sep_state, i).samples_logged = 0U;
 		per_cpu(sep_info.sep_state, i).samples_dropped = 0U;
@@ -719,7 +712,7 @@ void profiling_stop_pmu(void)
 		return;
 	}
 
-	for (i = 0; i < phys_cpu_num; i++) {
+	for (i = 0; i < (int)phys_cpu_num; i++) {
 		per_cpu(sep_info.ipi_cmd, i) = IPI_PMU_STOP;
 		if (per_cpu(sep_info.sep_state, i).pmu_state == PMU_RUNNING) {
 			per_cpu(sep_info.sep_state, i).pmu_state = PMU_SETUP;
@@ -814,7 +807,7 @@ int profiling_msr_ops_all_cpus(const struct vm *vm, uint64_t addr)
 		return -EINVAL;
 	}
 
-	for (i = 0U; i < (uint32_t)phys_cpu_num; i++) {
+	for (i = 0U; i < phys_cpu_num; i++) {
 		per_cpu(sep_info.ipi_cmd, i) = IPI_MSR_OP;
 		per_cpu(sep_info.msr_node, i) = &(msr_list[i]);
 	}
@@ -829,10 +822,10 @@ int profiling_msr_ops_all_cpus(const struct vm *vm, uint64_t addr)
 /*
  * Generate VM info list
  */
-int profiling_vm_info_list(const struct vm *vm1, uint64_t addr)
+int profiling_vm_info_list(const struct vm *vm, uint64_t addr)
 {
 	struct list_head *pos;
-	struct vm *vm;
+	struct vm *tmp_vm;
 	struct vcpu *vcpu;
 	int i, vm_idx;
 	struct profiling_vm_info_list vm_info_list;
@@ -841,7 +834,7 @@ int profiling_vm_info_list(const struct vm *vm1, uint64_t addr)
 
 	dev_dbg(ACRN_DBG_PROFILING, "%s: entering", __func__);
 
-	if (copy_from_gpa(vm1, &vm_info_list, addr, sizeof(vm_info_list)) != 0) {
+	if (copy_from_gpa(vm, &vm_info_list, addr, sizeof(vm_info_list)) != 0) {
 		pr_err("%s: Unable to copy addr from vm\n", __func__);
 		return -EINVAL;
 	}
@@ -849,7 +842,7 @@ int profiling_vm_info_list(const struct vm *vm1, uint64_t addr)
 	vm_idx = 0;
 	vm_info_list.vm_list[vm_idx].vm_id = 0xFFFFFFFFU;
 	memcpy_s(vm_info_list.vm_list[vm_idx].vm_name, 4, "VMM\0", 4);
-	for (i = 0; i < phys_cpu_num; i++) {
+	for (i = 0; i < (int)phys_cpu_num; i++) {
 		vm_info_list.vm_list[vm_idx].cpu_map[i].vcpu_id = i;
 		vm_info_list.vm_list[vm_idx].cpu_map[i].pcpu_id = i;
 		vm_info_list.vm_list[vm_idx].cpu_map[i].apic_id
@@ -862,17 +855,17 @@ int profiling_vm_info_list(const struct vm *vm1, uint64_t addr)
 	list_for_each(pos, &vm_list) {
 		i = 0;
 
-		vm = list_entry(pos, struct vm, list);
+		tmp_vm = list_entry(pos, struct vm, list);
 
 		vm_info_list.num_vms++;
 		vm_idx++;
 
-		vm_info_list.vm_list[vm_idx].vm_id = vm->vm_id;
-		memcpy_s(vm_info_list.vm_list[vm_idx].guid, 16, vm->GUID, 16);
+		vm_info_list.vm_list[vm_idx].vm_id = tmp_vm->vm_id;
+		memcpy_s(vm_info_list.vm_list[vm_idx].guid, 16, tmp_vm->GUID, 16);
 		snprintf(vm_info_list.vm_list[vm_idx].vm_name, 16, "%vm_%d",
-				vm->vm_id, 16);
+				tmp_vm->vm_id, 16);
 		vm_info_list.vm_list[vm_idx].num_vcpus = 0;
-		foreach_vcpu(i, vm, vcpu) {
+		foreach_vcpu(i, tmp_vm, vcpu) {
 			vm_info_list.vm_list[vm_idx].cpu_map[i].vcpu_id
 					= vcpu->vcpu_id;
 			vm_info_list.vm_list[vm_idx].cpu_map[i].pcpu_id
@@ -883,7 +876,7 @@ int profiling_vm_info_list(const struct vm *vm1, uint64_t addr)
 	}
 	spinlock_release(&vm_list_lock);
 
-	if (copy_to_gpa(vm1, &vm_info_list, addr, sizeof(vm_info_list)) != 0) {
+	if (copy_to_gpa(vm, &vm_info_list, addr, sizeof(vm_info_list)) != 0) {
 		pr_err("%s: Unable to copy addr to vm\n", __func__);
 		return -EINVAL;
 	}
@@ -1042,7 +1035,7 @@ int profiling_set_control(const struct vm *vm, uint64_t addr)
 					}
 				}
 			}
-			for (i = 0U; i < (uint32_t)phys_cpu_num; i++) {
+			for (i = 0U; i < phys_cpu_num; i++) {
 				per_cpu(sep_info.socwatch_state, i)
 					= SW_RUNNING;
 			}
@@ -1050,7 +1043,7 @@ int profiling_set_control(const struct vm *vm, uint64_t addr)
 			dev_dbg(ACRN_DBG_PROFILING,
 			"%s: socwatch stop collection invoked or collection switch not set!",
 			__func__);
-			for (i = 0U; i < (uint32_t)phys_cpu_num; i++) {
+			for (i = 0U; i < phys_cpu_num; i++) {
 				per_cpu(sep_info.socwatch_state, i)
 					= SW_STOPPED;
 			}
@@ -1083,7 +1076,7 @@ int profiling_config_pmi(const struct vm *vm, uint64_t addr)
 		return -EINVAL;
 	}
 
-	for (i = 0U; i < (uint32_t)phys_cpu_num; i++) {
+	for (i = 0U; i < phys_cpu_num; i++) {
 		if (!((per_cpu(sep_info.sep_state, i).pmu_state ==
 				PMU_INITIALIZED) ||
 			(per_cpu(sep_info.sep_state, i).pmu_state ==
@@ -1101,7 +1094,7 @@ int profiling_config_pmi(const struct vm *vm, uint64_t addr)
 		return -EINVAL;
 	}
 
-	for (i = 0U; i < (uint32_t)phys_cpu_num; i++) {
+	for (i = 0U; i < phys_cpu_num; i++) {
 		per_cpu(sep_info.ipi_cmd, i) = IPI_PMU_CONFIG;
 		per_cpu(sep_info.sep_state, i).num_pmi_groups
 			= pmi_config->num_groups;
@@ -1158,7 +1151,7 @@ int profiling_config_vmsw(const struct vm *vm, uint64_t addr)
 
 	switch (vmsw_config.collector_id) {
 	case COLLECT_PROFILE_DATA:
-		for (i = 0U; i < (uint32_t)phys_cpu_num; i++) {
+		for (i = 0U; i < phys_cpu_num; i++) {
 			per_cpu(sep_info.ipi_cmd, i) = IPI_VMSW_CONFIG;
 
 			memcpy_s(
@@ -1276,7 +1269,7 @@ int profiling_vmenter_handler(__unused struct vcpu *vcpu)
 }
 
 /*
- * Save the VCPU info on vmexit
+ * Save the context info from VCPU info on vmexit
  */
 int profiling_vmexit_handler(struct vcpu *vcpu, uint64_t exit_reason)
 {
@@ -1330,6 +1323,16 @@ int profiling_vmexit_handler(struct vcpu *vcpu, uint64_t exit_reason)
 		}
 	}
 	return 0;
+}
+
+/*
+ * Save the context info on interrupt
+ */
+void profiling_capture_intr_context(struct intr_excp_ctx *ctx)
+{
+	get_cpu_var(sep_info.vmm_ctx).rip = ctx->rip;
+	get_cpu_var(sep_info.vmm_ctx).rflags = ctx->rflags;
+	get_cpu_var(sep_info.vmm_ctx).cs = ctx->cs;
 }
 
 /*
