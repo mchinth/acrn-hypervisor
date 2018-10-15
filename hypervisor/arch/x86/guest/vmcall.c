@@ -183,7 +183,7 @@ int vmcall_vmexit_handler(struct vcpu *vcpu)
 
 #ifdef HV_DEBUG
 	case HC_PROFILING_OPS:
-		ret = hcall_profiling_ops(vm, param1, param2);
+		ret = (int32_t)hcall_profiling_ops(vm, param1, param2);
 		break;
 #endif
 

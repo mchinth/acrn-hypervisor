@@ -18,15 +18,6 @@ static void kick_notification(__unused uint32_t irq, __unused void *data)
 	 */
 	uint16_t pcpu_id = get_cpu_id();
 
-#if defined(HV_DEBUG)
-	uint16_t profiling_ipi = get_cpu_var(sep_info.ipi_cmd);
-
-	if (profiling_ipi > IPI_BEGIN && profiling_ipi < IPI_UNKNOWN) {
-		pr_info("PMI IPI to be handled %d ", profiling_ipi);
-		profiling_ipi_handler();
-	}
-#endif
-
 	if (bitmap_test(pcpu_id, &smp_call_mask)) {
 		struct smp_call_info_data *smp_call =
 			&per_cpu(smp_call_info, pcpu_id);

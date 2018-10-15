@@ -261,6 +261,35 @@ void set_irq_trigger_mode(uint32_t irq, bool is_level_trigger)
 	spinlock_irqrestore_release(&desc->lock, rflags);
 }
 
+#ifdef HV_DEBUG
+uint64_t rip_on_irq(uint32_t irq)
+{
+	if (irq < NR_IRQS) {
+		return irq_desc_array[irq].ctx_rip;
+	} else {
+		return (uint64_t)-1;
+	}
+}
+
+uint64_t rflags_on_irq(uint32_t irq)
+{
+	if (irq < NR_IRQS) {
+		return irq_desc_array[irq].ctx_rflags;
+	} else {
+		return (uint64_t)-1;
+	}
+}
+
+uint64_t cs_on_irq(uint32_t irq)
+{
+	if (irq < NR_IRQS) {
+		return irq_desc_array[irq].ctx_cs;
+	} else {
+		return (uint64_t)-1;
+	}
+}
+#endif
+
 uint32_t irq_to_vector(uint32_t irq)
 {
 	if (irq < NR_IRQS) {
@@ -309,6 +338,7 @@ static inline void handle_irq(struct irq_desc *desc)
 	/* Send EOI to LAPIC/IOAPIC IRR */
 	send_lapic_eoi();
 
+
 	if (action != NULL) {
 		action(desc->irq, desc->priv_data);
 	}
@@ -349,9 +379,9 @@ void dispatch_interrupt(struct intr_excp_ctx *ctx)
 	}
 
 #ifdef HV_DEBUG
-	if (vr == VECTOR_PMI) {
-		profiling_capture_intr_context(ctx);
-	}
+	desc->ctx_rip = ctx->rip;
+	desc->ctx_rflags = ctx->rflags;
+	desc->ctx_cs = ctx->cs;
 #endif
 
 	handle_irq(desc);

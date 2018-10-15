@@ -86,6 +86,12 @@ uint32_t alloc_irq_vector(uint32_t irq);
 
 uint32_t irq_to_vector(uint32_t irq);
 
+#ifdef HV_DEBUG
+uint64_t rip_on_irq(uint32_t irq);
+uint64_t rfalgs_on_irq(uint32_t irq);
+uint64_t cs_on_irq(uint32_t irq);
+#endif
+
 /*
  * Some MSI message definitions
  */

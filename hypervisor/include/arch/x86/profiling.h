@@ -27,21 +27,20 @@ enum MSR_CMD_STATUS {
 };
 
 enum MSR_CMD_TYPE {
-	MSR_OP_NONE = 0U,
+	MSR_OP_NONE = 0,
 	MSR_OP_READ,
 	MSR_OP_WRITE,
 	MSR_OP_READ_CLEAR
 };
 
 enum PMU_MSR_TYPE {
-	PMU_MSR_CCCR = 0U,
+	PMU_MSR_CCCR = 0,
 	PMU_MSR_ESCR,
 	PMU_MSR_DATA
 };
 
 typedef enum IPI_COMMANDS {
-	IPI_BEGIN,
-	IPI_MSR_OP,
+	IPI_MSR_OP = 0,
 	IPI_PMU_CONFIG,
 	IPI_PMU_START,
 	IPI_PMU_STOP,
@@ -50,7 +49,7 @@ typedef enum IPI_COMMANDS {
 } ipi_commands;
 
 typedef enum SEP_PMU_STATE {
-	PMU_INITIALIZED,
+	PMU_INITIALIZED = 0,
 	PMU_SETUP,
 	PMU_RUNNING,
 	PMU_UNINITIALIZED,
@@ -68,7 +67,7 @@ typedef enum PROFILING_SEP_FEATURE {
 } profiling_sep_feature;
 
 typedef enum SOCWATCH_STATE {
-	SW_SETUP,
+	SW_SETUP = 0,
 	SW_RUNNING,
 	SW_STOPPED
 } socwatch_state;
@@ -103,7 +102,7 @@ struct profiling_msr_ops_list {
 	uint32_t	num_entries;
 	int32_t		msr_op_state;
 	struct profiling_msr_op entries[MAX_MSR_LIST_NUM];
-} __aligned(8);
+};
 
 struct profiling_pmi_config {
 	uint32_t num_groups;
@@ -113,20 +112,20 @@ struct profiling_pmi_config {
 	struct profiling_msr_op stop_list[MAX_GROUP_NUM][MAX_MSR_LIST_NUM];
 	struct profiling_msr_op entry_list[MAX_GROUP_NUM][MAX_MSR_LIST_NUM];
 	struct profiling_msr_op exit_list[MAX_GROUP_NUM][MAX_MSR_LIST_NUM];
-} __aligned(8);
+};
 
 struct profiling_vmsw_config {
 	int32_t collector_id;
 	struct profiling_msr_op initial_list[MAX_MSR_LIST_NUM];
 	struct profiling_msr_op entry_list[MAX_MSR_LIST_NUM];
 	struct profiling_msr_op exit_list[MAX_MSR_LIST_NUM];
-} __aligned(8);
+};
 
 struct profiling_vcpu_pcpu_map {
 	int32_t vcpu_id;
 	int32_t pcpu_id;
 	int32_t apic_id;
-} __aligned(8);
+};
 
 struct profiling_vm_info {
 	int32_t		vm_id;
@@ -134,25 +133,25 @@ struct profiling_vm_info {
 	char		vm_name[16];
 	int32_t		num_vcpus;
 	struct profiling_vcpu_pcpu_map	cpu_map[MAX_NR_VCPUS];
-} __aligned(8);
+};
 
 struct profiling_vm_info_list {
 	int32_t num_vms;
 	struct profiling_vm_info vm_list[MAX_NR_VMS];
-} __aligned(8);
+};
 
 struct profiling_version_info {
 	int32_t major;
 	int32_t minor;
 	int64_t supported_features;
 	int64_t reserved;
-} __aligned(8);
+};
 
 struct profiling_control {
 	int32_t		collector_id;
 	int32_t		reserved;
 	uint64_t	switches;
-} __aligned(8);
+};
 
 struct profiling_pcpuid {
 	uint32_t leaf;
@@ -161,13 +160,13 @@ struct profiling_pcpuid {
 	uint32_t ebx;
 	uint32_t ecx;
 	uint32_t edx;
-} __aligned(8);
+};
 
 struct vmexit_msr {
 	uint32_t msr_idx;
 	uint32_t reserved;
 	uint64_t msr_data;
-} __aligned(16);
+};
 
 struct guest_vm_info {
 	int		vm_id;
@@ -178,7 +177,7 @@ struct guest_vm_info {
 	uint64_t	guest_rip;
 	uint64_t	guest_rflags;
 	uint64_t	guest_cs;
-} __aligned(8);
+};
 
 struct vmm_ctx_info {
 	uint64_t rip;
@@ -300,43 +299,39 @@ struct vm_switch_trace {
 struct sep_profiling_wrapper {
 	struct profiling_msr_ops_list	*msr_node;
 	struct sep_state		sep_state;
-	struct guest_vm_info		vm_info;
+	struct guest_vm_info	vm_info;
 	struct vmm_ctx_info		vmm_ctx;
 	ipi_commands			ipi_cmd;
 	struct pmu_sample		pmu_sample;
 	struct vm_switch_trace	vm_switch_trace;
-	socwatch_state			socwatch_state;
-	struct sw_msr_op_info		sw_msr_op_info;
+	socwatch_state			soc_state;
+	struct sw_msr_op_info	sw_msr_op_info;
 };
 
 #define VM_SWITCH_TRACE_SIZE (sizeof(struct vm_switch_trace))
-
-struct intr_excp_ctx;
 
 void profiling_start_pmu(void);
 void profiling_stop_pmu(void);
 int profiling_get_version(const struct vm *vm, uint64_t addr);
 int profiling_get_pcpuid(const struct vm *vm, uint64_t addr);
 int profiling_msr_ops_all_cpus(const struct vm *vm, uint64_t addr);
-int profiling_vm_info_list(const struct vm *vm, uint64_t addr);
+int profiling_vm_list_info(const struct vm *vm, uint64_t addr);
 int profiling_get_control(const struct vm *vm, uint64_t addr);
 int profiling_set_control(const struct vm *vm, uint64_t addr);
 int profiling_config_pmi(const struct vm *vm, uint64_t addr);
 int profiling_config_vmsw(const struct vm *vm, uint64_t addr);
 
 #ifdef HV_DEBUG
-int profiling_vmenter_handler(struct vcpu *vcpu);
-int profiling_vmexit_handler(struct vcpu *vcpu, uint64_t exit_reason);
-void profiling_capture_intr_context(struct intr_excp_ctx *ctx);
+void profiling_vmenter_handler(struct vcpu *vcpu);
+void profiling_vmexit_handler(struct vcpu *vcpu, uint64_t exit_reason);
 void profiling_setup(void);
-int profiling_ipi_handler(void);
+int profiling_ipi_handler(void *data);
 #else
-static inline int profiling_vmenter_handler(struct vcpu *vcpu) {};
-static inline int profiling_vmexit_handler(struct vcpu *vcpu,
+static inline void profiling_vmenter_handler(struct vcpu *vcpu) {};
+static inline void profiling_vmexit_handler(struct vcpu *vcpu,
 				uint64_t exit_reason) {};
-static inline void profiling_capture_intr_context(struct intr_excp_ctx *ctx) {};
 static inline void profiling_setup(void) {};
-static inline int profiling_ipi_handler(void) {};
+static inline int profiling_ipi_handler(void *data) {};
 #endif
 
 #endif /* PROFILING_H */

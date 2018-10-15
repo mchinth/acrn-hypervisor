@@ -1003,7 +1003,7 @@ int64_t hcall_profiling_ops(struct vm *vm, uint64_t cmd, uint64_t param)
 	case PROFILING_MSR_OPS:
 		return profiling_msr_ops_all_cpus(vm, param);
 	case PROFILING_GET_VMINFO:
-		return profiling_vm_info_list(vm, param);
+		return profiling_vm_list_info(vm, param);
 	case PROFILING_GET_VERSION:
 		return profiling_get_version(vm, param);
 	case PROFILING_GET_CONTROL_SWITCH:
