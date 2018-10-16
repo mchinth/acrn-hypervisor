@@ -49,6 +49,9 @@ struct per_cpu_region {
 	char logbuf[LOG_MESSAGE_MAX_SIZE];
 	uint8_t lapic_id;
 	struct smp_call_info_data smp_call_info;
+#ifdef HV_DEBUG
+	struct profiling_info_wrapper profiling_info;
+#endif
 } __aligned(CPU_PAGE_SIZE); /* per_cpu_region size aligned with CPU_PAGE_SIZE */
 
 extern struct per_cpu_region *per_cpu_data_base_ptr;

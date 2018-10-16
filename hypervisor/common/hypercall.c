@@ -1089,3 +1089,28 @@ int32_t hcall_set_callback_vector(const struct vm *vm, uint64_t param)
 
 	return 0;
 }
+
+int32_t hcall_profiling_ops(struct vm *vm, uint64_t cmd, uint64_t param)
+{
+	switch (cmd) {
+	case PROFILING_MSR_OPS:
+		return profiling_msr_ops_all_cpus(vm, param);
+	case PROFILING_GET_VMINFO:
+		return profiling_vm_list_info(vm, param);
+	case PROFILING_GET_VERSION:
+		return profiling_get_version(vm, param);
+	case PROFILING_GET_CONTROL_SWITCH:
+		return profiling_get_control(vm, param);
+	case PROFILING_SET_CONTROL_SWITCH:
+		return profiling_set_control(vm, param);
+	case PROFILING_CONFIG_PMI:
+		return profiling_config_pmi(vm, param);
+	case PROFILING_CONFIG_VMSWITCH:
+		return profiling_config_vmsw(vm, param);
+	case PROFILING_GET_PCPUID:
+		return profiling_get_pcpuid(vm, param);
+	default:
+		pr_err("%s: invalid profiling command %llu\n", __func__, cmd);
+		return (int32_t)-1;
+	}
+}

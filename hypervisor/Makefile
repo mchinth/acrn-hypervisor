@@ -141,6 +141,7 @@ C_SRCS += arch/x86/vmx.c
 C_SRCS += arch/x86/assign.c
 C_SRCS += arch/x86/trusty.c
 C_SRCS += arch/x86/cpu_state_tbl.c
+D_SRCS += arch/x86/profiling.c
 C_SRCS += arch/x86/mtrr.c
 C_SRCS += arch/x86/pm.c
 S_SRCS += arch/x86/wakeup.S
