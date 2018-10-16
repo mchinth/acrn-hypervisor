@@ -12,8 +12,18 @@
 #define MAX_NR_VCPUS			8
 #define MAX_NR_VMS				6
 
+#define MAX_MSR_LIST_NUM		15U
+#define MAX_GROUP_NUM			1U
+
 #define COLLECT_PROFILE_DATA	0
 #define COLLECT_POWER_DATA		1
+
+enum MSR_CMD_TYPE {
+	MSR_OP_NONE = 0,
+	MSR_OP_READ,
+	MSR_OP_WRITE,
+	MSR_OP_READ_CLEAR
+};
 
 typedef enum IPI_COMMANDS {
 	IPI_MSR_OP = 0,
@@ -23,6 +33,14 @@ typedef enum IPI_COMMANDS {
 	IPI_VMSW_CONFIG,
 	IPI_UNKNOWN,
 } ipi_commands;
+
+typedef enum SEP_PMU_STATE {
+	PMU_INITIALIZED = 0,
+	PMU_SETUP,
+	PMU_RUNNING,
+	PMU_UNINITIALIZED,
+	PMU_UNKNOWN
+} sep_pmu_state;
 
 typedef enum PROFILING_SEP_FEATURE {
 	CORE_PMU_SAMPLING = 0U,
@@ -75,10 +93,69 @@ struct profiling_vm_info_list {
 	struct profiling_vm_info vm_list[MAX_NR_VMS];
 };
 
+struct profiling_msr_op {
+	/* value to write or location to write into */
+	uint64_t	value;
+	/* MSR address to read/write; last entry will have value of -1 */
+	uint32_t	msr_id;
+	/* parameter; usage depends on operation */
+	uint16_t	param;
+	uint8_t		op_type;
+	uint8_t		reg_type;
+};
+
+struct profiling_pmi_config {
+	uint32_t num_groups;
+	uint32_t trigger_count;
+	struct profiling_msr_op initial_list[MAX_GROUP_NUM][MAX_MSR_LIST_NUM];
+	struct profiling_msr_op start_list[MAX_GROUP_NUM][MAX_MSR_LIST_NUM];
+	struct profiling_msr_op stop_list[MAX_GROUP_NUM][MAX_MSR_LIST_NUM];
+	struct profiling_msr_op entry_list[MAX_GROUP_NUM][MAX_MSR_LIST_NUM];
+	struct profiling_msr_op exit_list[MAX_GROUP_NUM][MAX_MSR_LIST_NUM];
+};
+
+struct profiling_vmsw_config {
+	int32_t collector_id;
+	struct profiling_msr_op initial_list[MAX_MSR_LIST_NUM];
+	struct profiling_msr_op entry_list[MAX_MSR_LIST_NUM];
+	struct profiling_msr_op exit_list[MAX_MSR_LIST_NUM];
+};
+
+
+struct sep_state {
+	sep_pmu_state pmu_state;
+
+	uint32_t current_pmi_group_id;
+	uint32_t num_pmi_groups;
+
+	struct profiling_msr_op
+		pmi_initial_msr_list[MAX_GROUP_NUM][MAX_MSR_LIST_NUM];
+	struct profiling_msr_op
+		pmi_start_msr_list[MAX_GROUP_NUM][MAX_MSR_LIST_NUM];
+	struct profiling_msr_op
+		pmi_stop_msr_list[MAX_GROUP_NUM][MAX_MSR_LIST_NUM];
+	struct profiling_msr_op
+		pmi_entry_msr_list[MAX_GROUP_NUM][MAX_MSR_LIST_NUM];
+	struct profiling_msr_op
+		pmi_exit_msr_list[MAX_GROUP_NUM][MAX_MSR_LIST_NUM];
+
+	uint32_t current_vmsw_group_id;
+	uint32_t num_msw_groups;
+	struct profiling_msr_op
+		vmsw_initial_msr_list[MAX_GROUP_NUM][MAX_MSR_LIST_NUM];
+	struct profiling_msr_op
+		vmsw_entry_msr_list[MAX_GROUP_NUM][MAX_MSR_LIST_NUM];
+	struct profiling_msr_op
+		vmsw_exit_msr_list[MAX_GROUP_NUM][MAX_MSR_LIST_NUM];
+
+	uint64_t guest_debugctl_value;
+};
+
 /*
  * Wrapper containing  SEP sampling/profiling related data structures
  */
 struct profiling_info_wrapper {
+	struct sep_state		sep_state;
 	ipi_commands			ipi_cmd;
 };
 
@@ -91,10 +168,8 @@ int32_t profiling_vm_list_info(struct vm *vm, uint64_t addr);
 int32_t profiling_get_control(struct vm *vm, uint64_t addr);
 int32_t profiling_set_control(__unused struct vm *vm,
 		__unused uint64_t addr);
-int32_t profiling_config_pmi(__unused struct vm *vm,
-		__unused uint64_t addr);
-int32_t profiling_config_vmsw(__unused struct vm *vm,
-		__unused uint64_t addr);
+int32_t profiling_config_pmi(struct vm *vm, uint64_t addr);
+int32_t profiling_config_vmsw(struct vm *vm, uint64_t addr);
 
 
 void profiling_vmenter_handler(__unused struct vcpu *vcpu);
