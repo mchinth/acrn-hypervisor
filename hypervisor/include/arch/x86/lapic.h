@@ -127,6 +127,7 @@ union lapic_id_reg {
 	} x2apic;
 };
 
+uint32_t read_lapic_reg32(uint32_t offset);
 void write_lapic_reg32(uint32_t offset, uint32_t value);
 void save_lapic(struct lapic_regs *regs);
 void early_init_lapic(void);
