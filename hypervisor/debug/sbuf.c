@@ -16,7 +16,7 @@ static inline bool sbuf_is_empty(struct shared_buf *sbuf)
 	return (sbuf->head == sbuf->tail);
 }
 
-static inline uint32_t sbuf_next_ptr(uint32_t pos_arg,
+uint32_t sbuf_next_ptr(uint32_t pos_arg,
 		uint32_t span, uint32_t scope)
 {
 	uint32_t pos = pos_arg;
@@ -162,3 +162,4 @@ int sbuf_share_setup(uint16_t pcpu_id, uint32_t sbuf_id, uint64_t *hva)
 
 	return 0;
 }
+
