@@ -161,6 +161,17 @@ struct vmexit_msr {
 	uint64_t msr_data;
 };
 
+struct guest_vm_info {
+	uint64_t	vmenter_tsc;
+	uint64_t	vmexit_tsc;
+	uint64_t	vmexit_reason;
+	uint64_t	guest_rip;
+	uint64_t	guest_rflags;
+	uint64_t	guest_cs;
+	int			vm_id;
+	int			external_vector;
+};
+
 struct sep_state {
 	sep_pmu_state pmu_state;
 
@@ -204,13 +215,22 @@ struct sep_state {
 
 } __aligned(8);
 
+struct vm_switch_trace {
+	uint64_t vmenter_tsc;
+	uint64_t vmexit_tsc;
+	uint64_t vmexit_reason;
+	int32_t  os_id;
+};
+
 /*
  * Wrapper containing  SEP sampling/profiling related data structures
  */
 struct profiling_info_wrapper {
 	struct profiling_msr_ops_list	*msr_node;
 	struct sep_state		sep_state;
+	struct guest_vm_info	vm_info;
 	ipi_commands			ipi_cmd;
+	struct vm_switch_trace	vm_switch_trace;
 	socwatch_state			soc_state;
 	struct sw_msr_op_info	sw_msr_op_info;
 } __aligned(8);
@@ -226,8 +246,8 @@ int32_t profiling_config_vmsw(struct vm *vm, uint64_t addr);
 
 
 void profiling_vmenter_handler(__unused struct vcpu *vcpu);
-void profiling_vmexit_handler(__unused struct vcpu *vcpu,
-		__unused uint64_t exit_reason);
+void profiling_vmexit_handler(struct vcpu *vcpu,
+	uint64_t exit_reason);
 void profiling_setup(void);
 void profiling_ipi_handler(__unused void *data);
 #endif

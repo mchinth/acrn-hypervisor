@@ -885,18 +885,71 @@ void profiling_ipi_handler(__unused void *data)
  */
 void profiling_vmenter_handler(__unused struct vcpu *vcpu)
 {
-	/* to be implemented */
+	if (((get_cpu_var(profiling_info.sep_state).pmu_state == PMU_RUNNING) &&
+			((sep_collection_switch &
+				(1UL << VM_SWITCH_TRACING)) > 0UL)) ||
+		((get_cpu_var(profiling_info.soc_state) == SW_RUNNING) &&
+			((socwatch_collection_switch &
+				(1UL << SOCWATCH_VM_SWITCH_TRACING)) > 0UL))) {
+
+		get_cpu_var(profiling_info.vm_info).vmenter_tsc = rdtsc();
+	}
 }
 
 /*
  * Save the VCPU info on vmexit
  */
-void profiling_vmexit_handler(__unused struct vcpu *vcpu, __unused uint64_t exit_reason)
+void profiling_vmexit_handler(struct vcpu *vcpu, uint64_t exit_reason)
 {
-	if (exit_reason == VMX_EXIT_REASON_EXTERNAL_INTERRUPT) {
-		/* to be implemented */
-	} else {
-		/* to be implemented */
+	per_cpu(profiling_info.sep_state, vcpu->pcpu_id).total_vmexit_count++;
+
+	if ((get_cpu_var(profiling_info.sep_state).pmu_state == PMU_RUNNING) ||
+		(get_cpu_var(profiling_info.soc_state) == SW_RUNNING)) {
+
+		get_cpu_var(profiling_info.vm_info).vmexit_tsc = rdtsc();
+		get_cpu_var(profiling_info.vm_info).vmexit_reason = exit_reason;
+		if (exit_reason == VMX_EXIT_REASON_EXTERNAL_INTERRUPT) {
+			get_cpu_var(profiling_info.vm_info).external_vector
+				= (int)exec_vmread(VMX_EXIT_INT_INFO) & 0xFFU;
+		} else {
+			get_cpu_var(profiling_info.vm_info).external_vector = -1;
+		}
+		get_cpu_var(profiling_info.vm_info).guest_rip
+			= vcpu_get_rip(vcpu);
+
+		get_cpu_var(profiling_info.vm_info).guest_rflags
+			= vcpu_get_rflags(vcpu);
+
+		get_cpu_var(profiling_info.vm_info).guest_cs
+			= exec_vmread64(VMX_GUEST_CS_SEL);
+
+		get_cpu_var(profiling_info.vm_info).vm_id = (int) vcpu->vm->vm_id;
+
+		/* Generate vmswitch sample */
+		if (((sep_collection_switch &
+					(1UL << VM_SWITCH_TRACING)) > 0UL) ||
+				((socwatch_collection_switch &
+					(1UL << SOCWATCH_VM_SWITCH_TRACING)) > 0UL)) {
+			get_cpu_var(profiling_info.vm_switch_trace).os_id
+				= (int32_t)vcpu->vm->vm_id;
+			get_cpu_var(profiling_info.vm_switch_trace).vmenter_tsc
+				= get_cpu_var(profiling_info.vm_info).vmenter_tsc;
+			get_cpu_var(profiling_info.vm_switch_trace).vmexit_tsc
+				= get_cpu_var(profiling_info.vm_info).vmexit_tsc;
+			get_cpu_var(profiling_info.vm_switch_trace).vmexit_reason
+				= exit_reason;
+
+			if ((sep_collection_switch &
+					(1UL << VM_SWITCH_TRACING)) > 0UL) {
+				profiling_generate_data(COLLECT_PROFILE_DATA,
+					VM_SWITCH_TRACING);
+			}
+			if ((socwatch_collection_switch &
+					(1UL << SOCWATCH_VM_SWITCH_TRACING)) > 0UL) {
+				profiling_generate_data(COLLECT_POWER_DATA,
+					SOCWATCH_VM_SWITCH_TRACING);
+			}
+		}
 	}
 }
 
