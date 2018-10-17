@@ -18,6 +18,14 @@
 #define COLLECT_PROFILE_DATA	0
 #define COLLECT_POWER_DATA		1
 
+#define SOCWATCH_MSR_OP			100U
+
+enum MSR_CMD_STATUS {
+	MSR_OP_READY = 0,
+	MSR_OP_REQUESTED,
+	MSR_OP_HANDLED
+};
+
 enum MSR_CMD_TYPE {
 	MSR_OP_NONE = 0,
 	MSR_OP_READ,
@@ -105,6 +113,13 @@ struct profiling_vm_info_list {
 	struct profiling_vm_info vm_list[MAX_NR_VMS];
 };
 
+struct sw_msr_op_info {
+	uint64_t core_msr[MAX_MSR_LIST_NUM];
+	uint32_t cpu_id;
+	uint32_t valid_entries;
+	uint16_t sample_id;
+};
+
 struct profiling_msr_op {
 	/* value to write or location to write into */
 	uint64_t	value;
@@ -114,6 +129,13 @@ struct profiling_msr_op {
 	uint16_t	param;
 	uint8_t		op_type;
 	uint8_t		reg_type;
+};
+
+struct profiling_msr_ops_list {
+	int32_t		collector_id;
+	uint32_t	num_entries;
+	int32_t		msr_op_state;
+	struct profiling_msr_op entries[MAX_MSR_LIST_NUM];
 };
 
 struct profiling_pmi_config {
@@ -186,16 +208,16 @@ struct sep_state {
  * Wrapper containing  SEP sampling/profiling related data structures
  */
 struct profiling_info_wrapper {
+	struct profiling_msr_ops_list	*msr_node;
 	struct sep_state		sep_state;
 	ipi_commands			ipi_cmd;
 	socwatch_state			soc_state;
-};
-
+	struct sw_msr_op_info	sw_msr_op_info;
+} __aligned(8);
 
 int32_t profiling_get_version(struct vm *vm, uint64_t addr);
+int32_t profiling_msr_ops_all_cpus(struct vm *vm, uint64_t addr);
 int32_t profiling_get_pcpuid(struct vm *vm, uint64_t addr);
-int32_t profiling_msr_ops_all_cpus(__unused struct vm *vm,
-		__unused uint64_t addr);
 int32_t profiling_vm_list_info(struct vm *vm, uint64_t addr);
 int32_t profiling_get_control(struct vm *vm, uint64_t addr);
 int32_t profiling_set_control(struct vm *vm, uint64_t addr);
